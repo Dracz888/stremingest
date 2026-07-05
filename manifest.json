@@ -1,0 +1,13 @@
+{
+  "name": "StreamGest",
+  "short_name": "StreamGest",
+  "description": "Gestión de cuentas de streaming: clientes, pagos, recargas y alertas",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0e1117",
+  "theme_color": "#0e1117",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
