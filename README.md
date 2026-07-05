@@ -24,6 +24,15 @@ Aplicación móvil (PWA) para administrar un negocio de reventa de cuentas de st
 
 Los datos se guardan en el dispositivo (localStorage). Usa **Menú → Respaldo** para exportar/importar un archivo `.json` con toda la información.
 
+## Compartir con otras personas (sincronización en la nube)
+
+**Menú → Compartir / Sincronizar** permite que varias personas **vean y editen** los mismos datos en vivo, limitado solo a quien tú quieras mediante una **clave**.
+
+- **Espacio compartido:** creas un espacio y obtienes un **código** y defines una **clave**. Quien tenga ambos (se los pasas por WhatsApp, por ejemplo) entra en *"Unirme a un espacio"* y queda sincronizado. Los cambios de cualquiera se reflejan en los demás.
+- **Privacidad:** los datos se **cifran en el dispositivo con AES-GCM** usando tu clave (derivada con PBKDF2). En la nube solo hay texto cifrado; sin la clave no se puede leer, aunque se conozca el código.
+- **Sin secretos en el repositorio:** la sincronización usa tu propio proyecto **gratuito de Firebase (Firestore)**. Pegas la configuración de tu proyecto dentro de la app (se guarda solo en tu dispositivo). La propia pantalla incluye el paso a paso y las **reglas de Firestore** listas para copiar.
+- **Modelo de conflictos:** gana la última escritura (*last-write-wins*) sobre el conjunto de datos; pensado para equipos pequeños (1–3 personas).
+
 ## Detalles técnicos
 
 - HTML/CSS/JS puro, sin dependencias ni proceso de build.

@@ -1,8 +1,8 @@
 /* Service worker: cache básico para funcionar sin conexión */
-const CACHE = 'streamgest-v4';
+const CACHE = 'streamgest-v5';
 const ASSETS = [
   '.', 'index.html', 'css/styles.css', 'icon.svg', 'manifest.json',
-  'js/utils.js', 'js/db.js', 'js/views-main.js', 'js/views-admin.js', 'js/app.js'
+  'js/utils.js', 'js/db.js', 'js/views-main.js', 'js/views-admin.js', 'js/sync.js', 'js/app.js'
 ];
 
 self.addEventListener('install', (e) => {

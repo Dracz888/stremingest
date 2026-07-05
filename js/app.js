@@ -25,6 +25,7 @@ const App = {
     App.renderTabbar();
     App.nav('dashboard');
     checkNotifications();
+    if (typeof Sync !== 'undefined') Sync.start();
   },
 
   /* ---- Pantalla de bienvenida (solo pide el nombre) ---- */
@@ -62,7 +63,7 @@ const App = {
   ],
 
   /* Vistas del menú se marcan bajo la pestaña Menú */
-  menuViews: ['menu','plataformas','monedas','metodos','cuentas','recargas','plantillas','respaldo'],
+  menuViews: ['menu','plataformas','monedas','metodos','cuentas','recargas','plantillas','sync','respaldo'],
 
   renderTabbar(){
     const n = alertCount();
