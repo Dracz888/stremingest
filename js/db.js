@@ -161,8 +161,17 @@ function dbLoad(){
   dbSave();
 }
 
-function dbSave(){
+/* Guarda solo en este dispositivo (sin avisar a la sincronización) */
+function dbSaveLocal(){
   localStorage.setItem(DB_KEY, JSON.stringify(DB));
+}
+
+/* Guarda y, si hay un espacio compartido activo, programa la subida a la nube */
+function dbSave(){
+  dbSaveLocal();
+  if (typeof Sync !== 'undefined' && Sync && typeof Sync.onLocalSave === 'function') {
+    Sync.onLocalSave();
+  }
 }
 
 /* ============ Utilidades de moneda ============ */

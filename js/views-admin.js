@@ -16,6 +16,7 @@ V.menu = function(){
   <button class="menu-item" onclick="App.nav('cuentas')">${I.key} Cuentas propias <span class="chev">${I.chev}</span></button>
   <button class="menu-item" onclick="App.nav('recargas')">${I.refresh} Recargas (egresos) <span class="chev">${I.chev}</span></button>
   <button class="menu-item" onclick="App.nav('plantillas')">${I.msg} Plantillas de WhatsApp <span class="chev">${I.chev}</span></button>
+  <button class="menu-item" onclick="App.nav('sync')">${I.cloud} Compartir / Sincronizar ${V._syncBadge()}<span class="chev">${I.chev}</span></button>
   <button class="menu-item" onclick="App.nav('respaldo')">${I.download} Respaldo de datos <span class="chev">${I.chev}</span></button>
   <button class="menu-item" onclick="V._cambiarNombre()">${I.users} Cambiar mi nombre <span class="chev">${I.chev}</span></button>`;
   App.render(html);
