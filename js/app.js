@@ -37,7 +37,7 @@ const App = {
         <p>¿Cómo te llamas? Así te damos la bienvenida.</p>
       </div>
       <label>Tu nombre</label>
-      <input id="wl-nombre" autocapitalize="words" placeholder="Ej: Adriano"
+      <input id="wl-nombre" autocapitalize="words" placeholder="Introducir nombre"
         onkeydown="if(event.key==='Enter')App.doStart()">
       <button class="btn full" style="margin-top:20px" onclick="App.doStart()">Entrar</button>
     </div></div>`;
