@@ -7,18 +7,35 @@
 V.menu = function(){
   const html = `
   <div class="page-head">
-    <div><h1>Menú</h1><div class="sub">Sesión: ${esc(Auth.current.usuario)}</div></div>
+    <div><h1>Menú</h1><div class="sub">Hola, ${esc(DB.config.usuario)}</div></div>
   </div>
 
   <button class="menu-item" onclick="App.nav('plataformas')">${I.tv} Plataformas y planes <span class="chev">${I.chev}</span></button>
   <button class="menu-item" onclick="App.nav('metodos')">${I.card} Métodos de pago <span class="chev">${I.chev}</span></button>
   <button class="menu-item" onclick="App.nav('cuentas')">${I.key} Cuentas propias <span class="chev">${I.chev}</span></button>
   <button class="menu-item" onclick="App.nav('recargas')">${I.refresh} Recargas (egresos) <span class="chev">${I.chev}</span></button>
-  <button class="menu-item" onclick="App.nav('accesos')">${I.users} Gestión de accesos <span class="chev">${I.chev}</span></button>
   <button class="menu-item" onclick="App.nav('plantillas')">${I.msg} Plantillas de WhatsApp <span class="chev">${I.chev}</span></button>
   <button class="menu-item" onclick="App.nav('respaldo')">${I.download} Respaldo de datos <span class="chev">${I.chev}</span></button>
-  <button class="menu-item danger" onclick="if(confirm('¿Cerrar sesión?'))Auth.logout()">${I.logout} Cerrar sesión</button>`;
+  <button class="menu-item" onclick="V._cambiarNombre()">${I.users} Cambiar mi nombre <span class="chev">${I.chev}</span></button>`;
   App.render(html);
+};
+
+V._cambiarNombre = function(){
+  Modal.open(`
+    <div class="modal-head"><h2>Cambiar mi nombre</h2>
+      <button class="icon-btn" onclick="Modal.close()">${I.x}</button></div>
+    <label>Tu nombre</label>
+    <input id="cn-nombre" autocapitalize="words" value="${esc(DB.config.usuario)}">
+    <div class="modal-actions">
+      <button class="btn" onclick="V._saveNombre()">Guardar</button>
+    </div>`);
+};
+
+V._saveNombre = function(){
+  const nombre = document.getElementById('cn-nombre').value.trim();
+  if (!nombre) return toast('Escribe tu nombre', true);
+  DB.config.usuario = nombre;
+  dbSave(); Modal.close(); toast('Nombre actualizado'); App.refresh();
 };
 
 /* =================================================================
@@ -410,87 +427,6 @@ const RecForm = {
 };
 
 /* =================================================================
-   GESTIÓN DE ACCESOS
-================================================================= */
-V.accesos = function(){
-  let html = `
-  <div class="page-head">
-    <div><h1>Accesos</h1><div class="sub">Usuarios que pueden entrar a la app</div></div>
-    <div class="head-actions"><button class="btn sm" onclick="UserForm.open()">${I.plus} Nuevo</button></div>
-  </div>`;
-  DB.users.forEach(u => {
-    const esYo = u.id === Auth.current.id;
-    html += `
-    <div class="card">
-      <div class="card-row">
-        <div class="avatar">${esc(initials(u.usuario))}</div>
-        <div style="flex:1;min-width:0">
-          <div style="font-weight:650">${esc(u.usuario)} ${esYo ? '<span class="chip blue" style="margin-left:4px">Tú</span>' : ''}</div>
-          <div style="font-size:.78rem;color:var(--muted)">Creado el ${fmtDate(u.fecha)}</div>
-        </div>
-        ${u.activo ? '<span class="chip green">Activo</span>' : '<span class="chip gray">Inactivo</span>'}
-      </div>
-      <div style="display:flex;gap:8px;margin-top:11px">
-        <button class="btn sm ghost" onclick="UserForm.changePass('${u.id}')">${I.key} Contraseña</button>
-        ${!esYo ? `<button class="btn sm ${u.activo ? 'danger' : 'green'}" onclick="UserForm.toggle('${u.id}')">${u.activo ? 'Desactivar' : 'Activar'}</button>` : ''}
-        ${!esYo ? `<button class="btn sm danger" onclick="UserForm.remove('${u.id}')">${I.trash}</button>` : ''}
-      </div>
-    </div>`;
-  });
-  App.render(html);
-};
-
-const UserForm = {
-  open(){
-    Modal.open(`
-      <div class="modal-head"><h2>Nuevo usuario</h2>
-        <button class="icon-btn" onclick="Modal.close()">${I.x}</button></div>
-      <label>Usuario *</label>
-      <input id="uf-usuario" autocapitalize="none" placeholder="nombre de usuario">
-      <label>Contraseña *</label>
-      <input id="uf-clave" type="password" placeholder="mínimo 4 caracteres">
-      <div class="modal-actions">
-        <button class="btn" onclick="UserForm.save()">Crear usuario</button>
-      </div>`);
-  },
-  async save(){
-    const err = await Auth.createUser(
-      document.getElementById('uf-usuario').value,
-      document.getElementById('uf-clave').value,
-      Auth.current.id
-    );
-    if (err) return toast(err, true);
-    Modal.close(); toast('Usuario creado'); App.refresh();
-  },
-  changePass(id){
-    const u = DB.users.find(x => x.id === id);
-    Modal.open(`
-      <div class="modal-head"><h2>Contraseña de ${esc(u.usuario)}</h2>
-        <button class="icon-btn" onclick="Modal.close()">${I.x}</button></div>
-      <label>Nueva contraseña *</label>
-      <input id="uf-nueva" type="password" placeholder="mínimo 4 caracteres">
-      <div class="modal-actions">
-        <button class="btn" onclick="UserForm.savePass('${id}')">Cambiar</button>
-      </div>`);
-  },
-  async savePass(id){
-    const err = await Auth.changePassword(id, document.getElementById('uf-nueva').value);
-    if (err) return toast(err, true);
-    Modal.close(); toast('Contraseña actualizada');
-  },
-  toggle(id){
-    const u = DB.users.find(x => x.id === id);
-    u.activo = !u.activo;
-    dbSave(); toast(u.activo ? 'Usuario activado' : 'Acceso revocado'); App.refresh();
-  },
-  remove(id){
-    if (!confirm('¿Eliminar este usuario definitivamente?')) return;
-    DB.users = DB.users.filter(x => x.id !== id);
-    dbSave(); toast('Usuario eliminado'); App.refresh();
-  }
-};
-
-/* =================================================================
    PLANTILLAS DE WHATSAPP
 ================================================================= */
 V.plantillas = function(){
@@ -552,7 +488,7 @@ V._importar = function(input){
   reader.onload = () => {
     try {
       const data = JSON.parse(reader.result);
-      if (!data || !Array.isArray(data.clientes) || !Array.isArray(data.users)) throw new Error('formato');
+      if (!data || !Array.isArray(data.clientes) || !Array.isArray(data.metodos)) throw new Error('formato');
       if (!confirm('Esto reemplazará TODOS los datos actuales por los del respaldo. ¿Continuar?')) return;
       DB = data;
       dbSave();

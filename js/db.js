@@ -7,7 +7,6 @@ let DB = null;
 
 function dbDefault(){
   return {
-    users: [],            // {id, usuario, hash, activo, creadoPor, fecha}
     clientes: [],         // {id, nombre, numero, notas, fecha}
     plataformas: [],      // {id, nombre, precioUsd, activo}
     metodos: [],          // {id, nombre, requiereTasa, activo}
@@ -20,6 +19,7 @@ function dbDefault(){
       renovado: 'Hola {nombre}, tu plan de {plan} fue renovado con éxito. Vence el {fecha}. Gracias por tu compra.'
     },
     config: {
+      usuario: '',           // nombre de quien usa la app (solo para dar la bienvenida)
       monedaVistaId: null,   // null = USD; si no, id de un método con tasa
       tasaVista: ''          // tasa usada solo para convertir la vista de Gestión
     }
@@ -40,7 +40,8 @@ function dbSeed(data){
 
 /* Migraciones para datos guardados con versiones anteriores */
 function dbMigrate(){
-  if (!DB.config) DB.config = { monedaVistaId: null, tasaVista: '' };
+  if (!DB.config) DB.config = { usuario: '', monedaVistaId: null, tasaVista: '' };
+  if (DB.config.usuario == null) DB.config.usuario = '';
   DB.metodos.forEach(m => { if (!m.modoTasa) m.modoTasa = 'dividir'; });
 }
 

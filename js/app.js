@@ -6,19 +6,14 @@ const App = {
 
   boot(){
     dbLoad();
-    const screen = document.getElementById('screen');
     const main = document.getElementById('main');
     const tabbar = document.getElementById('tabbar');
 
-    if (!DB.users.length) {
-      // Primera vez: crear el administrador
+    if (!DB.config.usuario) {
+      // Primera vez: solo pedimos el nombre para dar la bienvenida
       main.innerHTML = ''; tabbar.classList.add('hidden');
-      screen.innerHTML = App.setupHTML();
-      return;
-    }
-    if (!Auth.init()) {
-      main.innerHTML = ''; tabbar.classList.add('hidden');
-      screen.innerHTML = App.loginHTML();
+      document.getElementById('screen').innerHTML = App.welcomeHTML();
+      setTimeout(() => { const el = document.getElementById('wl-nombre'); if (el) el.focus(); }, 50);
       return;
     }
     App.showApp();
@@ -32,61 +27,28 @@ const App = {
     checkNotifications();
   },
 
-  /* ---- Pantallas de acceso ---- */
-  setupHTML(){
+  /* ---- Pantalla de bienvenida (solo pide el nombre) ---- */
+  welcomeHTML(){
     return `
     <div class="login-wrap"><div class="login-card">
       <div class="brand">
         <div class="logo">${I.play}</div>
         <h1>StreamGest</h1>
-        <p>Configura tu cuenta de administrador para empezar</p>
+        <p>¿Cómo te llamas? Así te damos la bienvenida.</p>
       </div>
-      <label>Usuario administrador</label>
-      <input id="su-usuario" autocapitalize="none" placeholder="Ej: adriano">
-      <label>Contraseña</label>
-      <input id="su-clave" type="password" placeholder="mínimo 4 caracteres">
-      <label>Repetir contraseña</label>
-      <input id="su-clave2" type="password" placeholder="repite la contraseña">
-      <button class="btn full" style="margin-top:20px" onclick="App.doSetup()">Crear administrador</button>
+      <label>Tu nombre</label>
+      <input id="wl-nombre" autocapitalize="words" placeholder="Ej: Adriano"
+        onkeydown="if(event.key==='Enter')App.doStart()">
+      <button class="btn full" style="margin-top:20px" onclick="App.doStart()">Entrar</button>
     </div></div>`;
   },
 
-  async doSetup(){
-    const u = document.getElementById('su-usuario').value;
-    const c1 = document.getElementById('su-clave').value;
-    const c2 = document.getElementById('su-clave2').value;
-    if (c1 !== c2) return toast('Las contraseñas no coinciden', true);
-    const err = await Auth.createUser(u, c1, null);
-    if (err) return toast(err, true);
-    await Auth.login(u.trim(), c1);
-    toast('Bienvenido a StreamGest');
-    App.showApp();
-  },
-
-  loginHTML(){
-    return `
-    <div class="login-wrap"><div class="login-card">
-      <div class="brand">
-        <div class="logo">${I.play}</div>
-        <h1>StreamGest</h1>
-        <p>Gestión de cuentas de streaming</p>
-      </div>
-      <label>Usuario</label>
-      <input id="lg-usuario" autocapitalize="none" placeholder="usuario"
-        onkeydown="if(event.key==='Enter')document.getElementById('lg-clave').focus()">
-      <label>Contraseña</label>
-      <input id="lg-clave" type="password" placeholder="contraseña"
-        onkeydown="if(event.key==='Enter')App.doLogin()">
-      <button class="btn full" style="margin-top:20px" onclick="App.doLogin()">Entrar</button>
-    </div></div>`;
-  },
-
-  async doLogin(){
-    const err = await Auth.login(
-      document.getElementById('lg-usuario').value,
-      document.getElementById('lg-clave').value
-    );
-    if (err) return toast(err, true);
+  doStart(){
+    const nombre = document.getElementById('wl-nombre').value.trim();
+    if (!nombre) return toast('Escribe tu nombre para continuar', true);
+    DB.config.usuario = nombre;
+    dbSave();
+    toast('¡Bienvenido, ' + nombre + '!');
     App.showApp();
   },
 
@@ -100,7 +62,7 @@ const App = {
   ],
 
   /* Vistas del menú se marcan bajo la pestaña Menú */
-  menuViews: ['menu','plataformas','metodos','cuentas','recargas','accesos','plantillas','respaldo'],
+  menuViews: ['menu','plataformas','metodos','cuentas','recargas','plantillas','respaldo'],
 
   renderTabbar(){
     const n = alertCount();
@@ -142,7 +104,7 @@ const App = {
 document.addEventListener('DOMContentLoaded', () => {
   App.boot();
   // Revisión periódica de vencimientos mientras la app está abierta
-  setInterval(() => { if (Auth.current) checkNotifications(); }, 30 * 60 * 1000);
+  setInterval(() => { if (DB && DB.config.usuario) checkNotifications(); }, 30 * 60 * 1000);
 });
 
 /* ---- Service worker (solo sobre http/https) ---- */
