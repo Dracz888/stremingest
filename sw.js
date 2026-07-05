@@ -1,5 +1,5 @@
 /* Service worker: cache básico para funcionar sin conexión */
-const CACHE = 'streamgest-v1';
+const CACHE = 'streamgest-v2';
 const ASSETS = [
   '.', 'index.html', 'css/styles.css', 'icon.svg', 'manifest.json',
   'js/utils.js', 'js/db.js', 'js/auth.js', 'js/views-main.js', 'js/views-admin.js', 'js/app.js'

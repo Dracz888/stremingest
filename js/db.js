@@ -18,6 +18,10 @@ function dbDefault(){
       porVencer: 'Hola {nombre}, te recordamos que tu plan de {plan} vence {cuando}. Escríbenos para renovarlo y no perder el servicio.',
       hoy: 'Hola {nombre}, tu plan de {plan} vence HOY. Renueva ahora para mantener tu servicio activo.',
       renovado: 'Hola {nombre}, tu plan de {plan} fue renovado con éxito. Vence el {fecha}. Gracias por tu compra.'
+    },
+    config: {
+      monedaVistaId: null,   // null = USD; si no, id de un método con tasa
+      tasaVista: ''          // tasa usada solo para convertir la vista de Gestión
     }
   };
 }
@@ -31,13 +35,19 @@ function dbSeed(data){
     { nombre: 'Bancolombia', requiereTasa: true },
     { nombre: 'USDT',        requiereTasa: false }
   ];
-  metodosIniciales.forEach(m => data.metodos.push({ id: uid(), nombre: m.nombre, requiereTasa: m.requiereTasa, activo: true }));
+  metodosIniciales.forEach(m => data.metodos.push({ id: uid(), nombre: m.nombre, requiereTasa: m.requiereTasa, modoTasa: 'dividir', activo: true }));
+}
+
+/* Migraciones para datos guardados con versiones anteriores */
+function dbMigrate(){
+  if (!DB.config) DB.config = { monedaVistaId: null, tasaVista: '' };
+  DB.metodos.forEach(m => { if (!m.modoTasa) m.modoTasa = 'dividir'; });
 }
 
 function dbLoad(){
   try {
     const raw = localStorage.getItem(DB_KEY);
-    if (raw) { DB = JSON.parse(raw); return; }
+    if (raw) { DB = JSON.parse(raw); dbMigrate(); return; }
   } catch(e){ console.error('Error cargando datos', e); }
   DB = dbDefault();
   dbSeed(DB);
@@ -46,6 +56,44 @@ function dbLoad(){
 
 function dbSave(){
   localStorage.setItem(DB_KEY, JSON.stringify(DB));
+}
+
+/* ============ Conversión de moneda ============ */
+
+/* Convierte un monto en la moneda del método a USD, según el modo de tasa */
+function convToUsd(monto, tasa, met){
+  monto = Number(monto) || 0;
+  if (!met || !met.requiereTasa) return monto;
+  tasa = Number(tasa) || 0;
+  if (tasa <= 0) return 0;
+  return met.modoTasa === 'multiplicar' ? monto * tasa : monto / tasa;
+}
+
+/* Convierte un valor en USD a la moneda de vista configurada en Gestión.
+   Devuelve null si la vista está en USD o la tasa no es válida. */
+function usdToVista(usd){
+  const cfg = DB.config || {};
+  if (!cfg.monedaVistaId) return null;
+  const met = getMetodo(cfg.monedaVistaId);
+  const tasa = Number(cfg.tasaVista) || 0;
+  if (!met || tasa <= 0) return null;
+  // Inversa del modo del método: si local→USD divide, USD→local multiplica
+  return met.modoTasa === 'multiplicar' ? usd / tasa : usd * tasa;
+}
+
+/* Formatea un valor USD en la moneda de vista elegida */
+function fmtVista(usd){
+  const v = usdToVista(usd);
+  if (v == null) return fmtUSD(usd);
+  const met = getMetodo(DB.config.monedaVistaId);
+  return fmtNum(v) + ' ' + met.nombre;
+}
+
+/* Etiqueta de la tasa según el modo del método */
+function tasaLabel(met){
+  return met.modoTasa === 'multiplicar'
+    ? 'Tasa (USD por 1 ' + met.nombre + ')'
+    : 'Tasa (' + met.nombre + ' por 1 USD)';
 }
 
 /* ---- Accesores básicos ---- */

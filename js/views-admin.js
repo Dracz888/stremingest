@@ -108,7 +108,7 @@ V.metodos = function(){
     <div class="list-item" onclick="MetForm.open('${m.id}')">
       <div class="body">
         <div class="title">${esc(m.nombre)}</div>
-        <div class="meta">${m.requiereTasa ? 'Requiere tasa de cambio' : 'Equivale 1:1 con USD'}</div>
+        <div class="meta">${m.requiereTasa ? 'Con tasa: monto ' + (m.modoTasa === 'multiplicar' ? '× tasa' : '÷ tasa') + ' = USD' : 'Equivale 1:1 con USD'}</div>
       </div>
       ${m.activo ? '<span class="chip green">Activo</span>' : '<span class="chip gray">Inactivo</span>'}
     </div>`;
@@ -120,15 +120,23 @@ const MetForm = {
   editId: null,
   open(id){
     MetForm.editId = id || null;
-    const m = id ? getMetodo(id) : { activo: true, requiereTasa: false };
+    const m = id ? getMetodo(id) : { activo: true, requiereTasa: false, modoTasa: 'dividir' };
     Modal.open(`
       <div class="modal-head"><h2>${id ? 'Editar método' : 'Nuevo método'}</h2>
         <button class="icon-btn" onclick="Modal.close()">${I.x}</button></div>
       <label>Nombre *</label>
       <input id="mf-nombre" value="${esc(m.nombre||'')}" placeholder='Ej: "Pago Móvil"'>
       <label style="display:flex;align-items:center;gap:9px;margin-top:16px">
-        <input type="checkbox" id="mf-tasa" ${m.requiereTasa ? 'checked' : ''}> Requiere tasa de cambio (moneda local)
+        <input type="checkbox" id="mf-tasa" ${m.requiereTasa ? 'checked' : ''}
+          onchange="document.getElementById('mf-modo-wrap').style.display=this.checked?'':'none'"> Requiere tasa de cambio (moneda local)
       </label>
+      <div id="mf-modo-wrap" style="${m.requiereTasa ? '' : 'display:none'}">
+        <label>Cómo se aplica la tasa</label>
+        <select id="mf-modo">
+          <option value="dividir" ${m.modoTasa !== 'multiplicar' ? 'selected' : ''}>Dividir: monto ÷ tasa = USD (ej: 4.500 Bs ÷ 45 = $100)</option>
+          <option value="multiplicar" ${m.modoTasa === 'multiplicar' ? 'selected' : ''}>Multiplicar: monto × tasa = USD (ej: 4.500 COP × 0.00025 = $1.13)</option>
+        </select>
+      </div>
       <label style="display:flex;align-items:center;gap:9px;margin-top:12px">
         <input type="checkbox" id="mf-activo" ${m.activo ? 'checked' : ''}> Método activo
       </label>
@@ -141,12 +149,13 @@ const MetForm = {
     const nombre = document.getElementById('mf-nombre').value.trim();
     if (!nombre) return toast('El nombre es obligatorio', true);
     const requiereTasa = document.getElementById('mf-tasa').checked;
+    const modoTasa = document.getElementById('mf-modo').value;
     const activo = document.getElementById('mf-activo').checked;
     if (MetForm.editId) {
       const m = getMetodo(MetForm.editId);
-      m.nombre = nombre; m.requiereTasa = requiereTasa; m.activo = activo;
+      m.nombre = nombre; m.requiereTasa = requiereTasa; m.modoTasa = modoTasa; m.activo = activo;
     } else {
-      DB.metodos.push({ id: uid(), nombre, requiereTasa, activo });
+      DB.metodos.push({ id: uid(), nombre, requiereTasa, modoTasa, activo });
     }
     dbSave(); Modal.close(); toast('Método guardado'); App.refresh();
   },
@@ -323,9 +332,10 @@ const RecForm = {
         <input type="number" step="any" min="0" inputmode="decimal" value="${pg.monto}"
           oninput="RecForm.pagos[${i}].monto=this.value;RecForm.calc()" placeholder="0.00">
         ${met && met.requiereTasa ? `
-        <label>Tasa (${esc(met.nombre)} por 1 USD)</label>
+        <label>${esc(tasaLabel(met))}</label>
         <input type="number" step="any" min="0" inputmode="decimal" value="${pg.tasa}"
-          oninput="RecForm.pagos[${i}].tasa=this.value;RecForm.calc()" placeholder="Ej: 45.50">` : ''}
+          oninput="RecForm.pagos[${i}].tasa=this.value;RecForm.calc()" placeholder="Ej: 45.50">
+        <div style="font-size:.72rem;color:var(--muted);margin-top:4px">Cálculo: monto ${met.modoTasa === 'multiplicar' ? '×' : '÷'} tasa = USD</div>` : ''}
         <div style="font-size:.78rem;color:var(--accent);margin-top:7px;font-weight:650" id="rec-usd-${i}"></div>
       </div>`;
     });
@@ -358,8 +368,7 @@ const RecForm = {
     RecForm.pagos.forEach((pg, i) => {
       const met = getMetodo(pg.metodoId);
       const monto = Number(pg.monto) || 0;
-      let usd = 0;
-      if (met) usd = met.requiereTasa ? (Number(pg.tasa) > 0 ? monto / Number(pg.tasa) : 0) : monto;
+      const usd = met ? convToUsd(monto, pg.tasa, met) : 0;
       total += usd;
       const el = document.getElementById('rec-usd-' + i);
       if (el) el.textContent = met && monto ? '= ' + fmtUSD(usd) + ' USD' : '';
@@ -383,7 +392,7 @@ const RecForm = {
       if (met.requiereTasa) {
         tasa = Number(pg.tasa) || 0;
         if (tasa <= 0) return toast('Ingresa la tasa para ' + met.nombre, true);
-        usd = monto / tasa;
+        usd = convToUsd(monto, tasa, met);
       }
       pagos.push({ metodoId: met.id, nombre: met.nombre, monto, tasa, usd });
     }

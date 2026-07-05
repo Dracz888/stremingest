@@ -17,6 +17,11 @@ V.dashboard = function(){
   const maxUsd = rank.length ? Math.max(...rank.map(r => r.usd), 0.01) : 1;
   const nAlertas = alertCount();
 
+  const cfg = DB.config;
+  const monedas = DB.metodos.filter(m => m.requiereTasa && (m.activo || m.id === cfg.monedaVistaId));
+  const metVista = cfg.monedaVistaId ? getMetodo(cfg.monedaVistaId) : null;
+  const vistaActiva = usdToVista(1) != null;
+
   let html = `
   <div class="page-head">
     <div>
@@ -25,10 +30,29 @@ V.dashboard = function(){
     </div>
   </div>
 
+  <div class="card" style="padding:12px">
+    <div style="display:flex;gap:8px;align-items:flex-end">
+      <div style="flex:1">
+        <label style="margin-top:0">Ver montos en</label>
+        <select onchange="V._setMonedaVista(this.value)">
+          <option value="">USD (dólares)</option>
+          ${monedas.map(m => `<option value="${m.id}" ${cfg.monedaVistaId===m.id?'selected':''}>${esc(m.nombre)}</option>`).join('')}
+        </select>
+      </div>
+      ${metVista ? `
+      <div style="flex:1">
+        <label style="margin-top:0">${esc(tasaLabel(metVista))}</label>
+        <input type="number" step="any" min="0" inputmode="decimal" value="${esc(cfg.tasaVista)}"
+          placeholder="Tasa del día" onchange="DB.config.tasaVista=this.value;dbSave();App.nav('dashboard')">
+      </div>` : ''}
+    </div>
+    ${metVista && !vistaActiva ? '<div style="font-size:.78rem;color:var(--amber);margin-top:8px">Ingresa la tasa del día para ver los montos en ' + esc(metVista.nombre) + '.</div>' : ''}
+  </div>
+
   <div class="grid3">
-    <div class="kpi"><div class="lbl">Ingresos</div><div class="val mono">${fmtUSD(ing)}</div></div>
-    <div class="kpi"><div class="lbl">Egresos</div><div class="val mono">${fmtUSD(egr)}</div></div>
-    <div class="kpi ${bal >= 0 ? 'green' : 'red'}"><div class="lbl">Balance</div><div class="val mono">${fmtUSD(bal)}</div></div>
+    <div class="kpi"><div class="lbl">Ingresos</div><div class="val mono" ${vistaActiva ? 'style="font-size:.95rem"' : ''}>${fmtVista(ing)}</div></div>
+    <div class="kpi"><div class="lbl">Egresos</div><div class="val mono" ${vistaActiva ? 'style="font-size:.95rem"' : ''}>${fmtVista(egr)}</div></div>
+    <div class="kpi ${bal >= 0 ? 'green' : 'red'}"><div class="lbl">Balance</div><div class="val mono" ${vistaActiva ? 'style="font-size:.95rem"' : ''}>${fmtVista(bal)}</div></div>
   </div>
 
   <div class="grid2" style="margin-top:10px">
@@ -52,12 +76,12 @@ V.dashboard = function(){
         <span style="font-weight:600">${esc(m.nombre)}</span>
         <span style="text-align:right">
           <span class="mono" style="font-weight:700">${fmtNum(m.monto)}</span>
-          <span class="mono" style="color:var(--muted);font-size:.78rem;display:block">≈ ${fmtUSD(m.usd)}</span>
+          <span class="mono" style="color:var(--muted);font-size:.78rem;display:block">≈ ${fmtVista(m.usd)}</span>
         </span>
       </div>`;
     });
     const totalCart = cart.reduce((s,m) => s + m.usd, 0);
-    html += `<div class="card-row" style="padding-top:10px"><span style="font-weight:750">Total equivalente</span><span class="mono" style="font-weight:750">${fmtUSD(totalCart)}</span></div>`;
+    html += `<div class="card-row" style="padding-top:10px"><span style="font-weight:750">Total equivalente</span><span class="mono" style="font-weight:750">${fmtVista(totalCart)}</span></div>`;
   }
   html += `</div>
 
@@ -77,7 +101,7 @@ V.dashboard = function(){
       <div class="rank-row">
         <div class="rr-top">
           <span class="n">${esc(r.nombre)}</span>
-          <span class="v mono">${r.ventas} venta${r.ventas!==1?'s':''} · ${fmtUSD(r.usd)}</span>
+          <span class="v mono">${r.ventas} venta${r.ventas!==1?'s':''} · ${fmtVista(r.usd)}</span>
         </div>
         <div class="bar"><div style="width:${Math.round(r.usd / maxUsd * 100)}%"></div></div>
       </div>`;
@@ -85,6 +109,12 @@ V.dashboard = function(){
   }
   html += `</div>`;
   App.render(html);
+};
+
+V._setMonedaVista = function(id){
+  DB.config.monedaVistaId = id || null;
+  dbSave();
+  App.nav('dashboard');
 };
 
 /* =================================================================
@@ -405,9 +435,10 @@ V.registro = function(){
       <input type="number" step="any" min="0" inputmode="decimal" value="${pg.monto}"
         oninput="RegForm.pagos[${i}].monto=this.value;V._regCalc()" placeholder="0.00">
       ${met && met.requiereTasa ? `
-      <label>Tasa (${esc(met.nombre)} por 1 USD)</label>
+      <label>${esc(tasaLabel(met))}</label>
       <input type="number" step="any" min="0" inputmode="decimal" value="${pg.tasa}"
-        oninput="RegForm.pagos[${i}].tasa=this.value;V._regCalc()" placeholder="Ej: 45.50">` : ''}
+        oninput="RegForm.pagos[${i}].tasa=this.value;V._regCalc()" placeholder="Ej: 45.50">
+      <div style="font-size:.72rem;color:var(--muted);margin-top:4px">Cálculo: monto ${met.modoTasa === 'multiplicar' ? '×' : '÷'} tasa = USD</div>` : ''}
       <div style="font-size:.78rem;color:var(--accent);margin-top:7px;font-weight:650" id="rf-usd-${i}"></div>
     </div>`;
   });
@@ -437,14 +468,8 @@ V._regCalc = function(){
   let pagado = 0;
   RegForm.pagos.forEach((pg, i) => {
     const met = getMetodo(pg.metodoId);
-    let usd = 0;
     const monto = Number(pg.monto) || 0;
-    if (met) {
-      if (met.requiereTasa) {
-        const tasa = Number(pg.tasa) || 0;
-        usd = tasa > 0 ? monto / tasa : 0;
-      } else usd = monto;
-    }
+    const usd = met ? convToUsd(monto, pg.tasa, met) : 0;
     pagado += usd;
     const el = document.getElementById('rf-usd-' + i);
     if (el) el.textContent = met && monto ? '= ' + fmtUSD(usd) + ' USD' : '';
@@ -483,7 +508,7 @@ V._regSave = function(){
     if (met.requiereTasa) {
       tasa = Number(pg.tasa) || 0;
       if (tasa <= 0) return toast('Ingresa la tasa para ' + met.nombre, true);
-      usd = monto / tasa;
+      usd = convToUsd(monto, tasa, met);
     }
     pagos.push({ metodoId: met.id, nombre: met.nombre, monto, tasa, usd });
   }
