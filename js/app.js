@@ -108,9 +108,28 @@ document.addEventListener('DOMContentLoaded', () => {
   setInterval(() => { if (DB && DB.config.usuario) checkNotifications(); }, 30 * 60 * 1000);
 });
 
-/* ---- Service worker (solo sobre http/https) ---- */
+/* ---- Service worker (solo sobre http/https) ----
+   Se actualiza solo: cuando hay una versión nueva publicada, el nuevo service
+   worker toma el control y la página se recarga una vez automáticamente, así
+   no te quedas con una versión vieja en caché. */
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloadingForUpdate = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    // En la primera instalación no había versión previa: no hace falta recargar.
+    if (!hadController || reloadingForUpdate) return;
+    reloadingForUpdate = true;
+    window.location.reload();
+  });
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    navigator.serviceWorker.register('sw.js').then(reg => {
+      reg.update(); // buscar actualizaciones al abrir la app
+    }).catch(() => {});
+  });
+  // Revisa si hay una nueva versión cada vez que vuelves a la app
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      navigator.serviceWorker.getRegistration().then(reg => { if (reg) reg.update(); });
+    }
   });
 }
