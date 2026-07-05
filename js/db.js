@@ -7,48 +7,154 @@ let DB = null;
 
 function dbDefault(){
   return {
-    clientes: [],         // {id, nombre, numero, notas, fecha}
-    plataformas: [],      // {id, nombre, precioUsd, activo}
-    metodos: [],          // {id, nombre, requiereTasa, activo}
+    monedas: [],          // {id, codigo, nombre, activo}
+    clientes: [],         // {id, nombre, numero, notas, fecha, suscripciones:[{id, cuentaId, plataformaId, vence, fecha}]}
+    plataformas: [],      // {id, nombre, monedaId, precio, activo}
+    metodos: [],          // {id, nombre, monedaId, activo}
     cuentas: [],          // {id, correo, clave, plataformaIds:[], estado, fecha}
-    registros: [],        // {id, clienteId, fecha, planes:[{plataformaId,nombre,dias,vence,precio}], pagos:[{metodoId,nombre,monto,tasa,usd}], totalUsd, esperadoUsd, saldo}
-    recargas: [],         // {id, cuentaId, fecha, pagos:[...], totalUsd, dias, vence}
+    registros: [],        // {id, clienteId, fecha, items:[{suscripcionId, plataformaId, nombre, monedaId, precio, dias, vence}], pagos:[{metodoId, nombre, monedaId, monto}], esperado:{monedaId:total}, pagado:{monedaId:total}, saldo:{monedaId:total}}
+    recargas: [],         // {id, cuentaId, fecha, pagos:[{metodoId, nombre, monedaId, monto}], total:{monedaId:total}, dias, vence}
     templates: {
       porVencer: 'Hola {nombre}, te recordamos que tu plan de {plan} vence {cuando}. Escríbenos para renovarlo y no perder el servicio.',
       hoy: 'Hola {nombre}, tu plan de {plan} vence HOY. Renueva ahora para mantener tu servicio activo.',
       renovado: 'Hola {nombre}, tu plan de {plan} fue renovado con éxito. Vence el {fecha}. Gracias por tu compra.'
     },
     config: {
-      usuario: '',           // nombre de quien usa la app (solo para dar la bienvenida)
-      monedaVistaId: null,   // null = USD; si no, id de un método con tasa
-      tasaVista: ''          // tasa usada solo para convertir la vista de Gestión
+      usuario: ''            // nombre de quien usa la app (solo para dar la bienvenida)
     }
   };
 }
 
 function dbSeed(data){
-  const metodosIniciales = [
-    { nombre: 'Bs',          requiereTasa: true },
-    { nombre: 'COP',         requiereTasa: true },
-    { nombre: 'USD',         requiereTasa: false },
-    { nombre: 'Zelle',       requiereTasa: false },
-    { nombre: 'Bancolombia', requiereTasa: true },
-    { nombre: 'USDT',        requiereTasa: false }
+  const monedasIniciales = [
+    { codigo: 'USD', nombre: 'Dólares' },
+    { codigo: 'COP', nombre: 'Pesos colombianos' },
+    { codigo: 'Bs',  nombre: 'Bolívares' }
   ];
-  metodosIniciales.forEach(m => data.metodos.push({ id: uid(), nombre: m.nombre, requiereTasa: m.requiereTasa, modoTasa: 'dividir', activo: true }));
+  monedasIniciales.forEach(m => data.monedas.push({ id: uid(), codigo: m.codigo, nombre: m.nombre, activo: true }));
+  const byCod = cod => (data.monedas.find(m => m.codigo === cod) || {}).id || null;
+  const metodosIniciales = [
+    { nombre: 'Efectivo Bs',  moneda: 'Bs'  },
+    { nombre: 'Pago Móvil',   moneda: 'Bs'  },
+    { nombre: 'Efectivo COP', moneda: 'COP' },
+    { nombre: 'Bancolombia',  moneda: 'COP' },
+    { nombre: 'Nequi',        moneda: 'COP' },
+    { nombre: 'Efectivo USD', moneda: 'USD' },
+    { nombre: 'Zelle',        moneda: 'USD' },
+    { nombre: 'USDT',         moneda: 'USD' }
+  ];
+  metodosIniciales.forEach(m => data.metodos.push({ id: uid(), nombre: m.nombre, monedaId: byCod(m.moneda), activo: true }));
 }
 
-/* Migraciones para datos guardados con versiones anteriores */
+/* Migraciones para datos guardados con versiones anteriores.
+   La versión anterior manejaba todo normalizado a USD con tasas de cambio.
+   El nuevo modelo maneja monedas nativas por plan y saldo por moneda. */
 function dbMigrate(){
-  if (!DB.config) DB.config = { usuario: '', monedaVistaId: null, tasaVista: '' };
+  if (!DB.config) DB.config = { usuario: '' };
   if (DB.config.usuario == null) DB.config.usuario = '';
-  DB.metodos.forEach(m => { if (!m.modoTasa) m.modoTasa = 'dividir'; });
+
+  // ---- 1. Catálogo de monedas ----
+  if (!Array.isArray(DB.monedas)) DB.monedas = [];
+  const ensureMoneda = (codigo, nombre) => {
+    let m = DB.monedas.find(x => x.codigo.toLowerCase() === codigo.toLowerCase());
+    if (!m) { m = { id: uid(), codigo, nombre: nombre || codigo, activo: true }; DB.monedas.push(m); }
+    return m.id;
+  };
+  const usdId = ensureMoneda('USD', 'Dólares');
+
+  // Deduce la moneda de un método antiguo por su nombre / si requería tasa
+  const monedaDeMetodoLegacy = (met) => {
+    const n = String(met.nombre || '').toLowerCase();
+    if (/cop|bancolombia|nequi|colomb|peso/.test(n)) return ensureMoneda('COP', 'Pesos colombianos');
+    if (/bs|bol[ií]var|pago m[óo]vil|ves/.test(n))   return ensureMoneda('Bs', 'Bolívares');
+    if (/zelle|usdt|usd|d[óo]lar|paypal/.test(n))    return usdId;
+    if (met.requiereTasa) return ensureMoneda(met.nombre, met.nombre); // moneda propia con el nombre del método
+    return usdId;
+  };
+
+  // ---- 2. Métodos: pasan de {requiereTasa, modoTasa} a {monedaId} ----
+  (DB.metodos || []).forEach(m => {
+    if (!m.monedaId) m.monedaId = monedaDeMetodoLegacy(m);
+    delete m.requiereTasa; delete m.modoTasa;
+  });
+
+  // ---- 3. Plataformas: precioUsd -> precio en USD ----
+  (DB.plataformas || []).forEach(p => {
+    if (!p.monedaId) p.monedaId = usdId;
+    if (p.precio == null) p.precio = Number(p.precioUsd) || 0;
+    delete p.precioUsd;
+  });
+  const getPrecio = id => { const p = (DB.plataformas||[]).find(x => x.id === id); return p ? { monedaId: p.monedaId, precio: Number(p.precio)||0, nombre: p.nombre } : null; };
+
+  // ---- 4. Reconstruir suscripciones de cada cliente desde su historial ----
+  (DB.clientes || []).forEach(c => {
+    if (!Array.isArray(c.suscripciones)) {
+      const porPlat = {};
+      (DB.registros || []).filter(r => r.clienteId === c.id).forEach(r => {
+        (r.planes || []).forEach(p => {
+          const k = p.plataformaId;
+          if (!porPlat[k] || (p.vence || '') > porPlat[k].vence) {
+            porPlat[k] = { plataformaId: k, vence: p.vence || null };
+          }
+        });
+      });
+      c.suscripciones = Object.keys(porPlat).map(platId => {
+        // si una sola cuenta ofrece esa plataforma, la vinculamos
+        const ctas = (DB.cuentas || []).filter(ct => (ct.plataformaIds || []).includes(platId));
+        return {
+          id: uid(), plataformaId: platId,
+          cuentaId: ctas.length === 1 ? ctas[0].id : null,
+          vence: porPlat[platId].vence, fecha: c.fecha || todayISO()
+        };
+      });
+    }
+  });
+
+  // ---- 5. Registros: de {planes, pagos(usd/tasa), totalUsd, esperadoUsd, saldo} a por-moneda ----
+  (DB.registros || []).forEach(r => {
+    if (r.items && r.saldo && typeof r.saldo === 'object') return; // ya migrado
+    const cli = (DB.clientes || []).find(c => c.id === r.clienteId);
+    const items = (r.planes || []).map(p => {
+      const info = getPrecio(p.plataformaId) || { monedaId: usdId, precio: Number(p.precio) || 0 };
+      const sus = cli && (cli.suscripciones || []).find(s => s.plataformaId === p.plataformaId);
+      return {
+        suscripcionId: sus ? sus.id : null,
+        plataformaId: p.plataformaId, nombre: p.nombre,
+        monedaId: info.monedaId, precio: info.precio,
+        dias: p.dias, vence: p.vence
+      };
+    });
+    const pagos = (r.pagos || []).map(pg => {
+      const met = (DB.metodos || []).find(m => m.id === pg.metodoId);
+      return { metodoId: pg.metodoId, nombre: pg.nombre, monedaId: met ? met.monedaId : usdId, monto: Number(pg.monto) || 0 };
+    });
+    r.items = items;
+    r.esperado = sumarPorMoneda(items.map(i => ({ monedaId: i.monedaId, monto: i.precio })));
+    r.pagado   = sumarPorMoneda(pagos);
+    r.saldo    = restarMapas(r.pagado, r.esperado);
+    delete r.planes; delete r.totalUsd; delete r.esperadoUsd;
+  });
+
+  // ---- 6. Recargas: pagos(usd/tasa) -> por-moneda ----
+  (DB.recargas || []).forEach(r => {
+    if (r.total && typeof r.total === 'object') return;
+    const pagos = (r.pagos || []).map(pg => {
+      const met = (DB.metodos || []).find(m => m.id === pg.metodoId);
+      return { metodoId: pg.metodoId, nombre: pg.nombre, monedaId: met ? met.monedaId : usdId, monto: Number(pg.monto) || 0 };
+    });
+    r.pagos = pagos;
+    r.total = sumarPorMoneda(pagos);
+    delete r.totalUsd;
+  });
+
+  // limpiar config antigua de vista en USD
+  if (DB.config) { delete DB.config.monedaVistaId; delete DB.config.tasaVista; }
 }
 
 function dbLoad(){
   try {
     const raw = localStorage.getItem(DB_KEY);
-    if (raw) { DB = JSON.parse(raw); dbMigrate(); return; }
+    if (raw) { DB = JSON.parse(raw); dbMigrate(); dbSave(); return; }
   } catch(e){ console.error('Error cargando datos', e); }
   DB = dbDefault();
   dbSeed(DB);
@@ -59,106 +165,147 @@ function dbSave(){
   localStorage.setItem(DB_KEY, JSON.stringify(DB));
 }
 
-/* ============ Conversión de moneda ============ */
+/* ============ Utilidades de moneda ============ */
 
-/* Convierte un monto en la moneda del método a USD, según el modo de tasa */
-function convToUsd(monto, tasa, met){
-  monto = Number(monto) || 0;
-  if (!met || !met.requiereTasa) return monto;
-  tasa = Number(tasa) || 0;
-  if (tasa <= 0) return 0;
-  return met.modoTasa === 'multiplicar' ? monto * tasa : monto / tasa;
+/* Suma una lista de {monedaId, monto} en un mapa {monedaId: total} */
+function sumarPorMoneda(items){
+  const map = {};
+  (items || []).forEach(it => {
+    const k = it.monedaId || '';
+    map[k] = (map[k] || 0) + (Number(it.monto) || 0);
+  });
+  return map;
 }
 
-/* Convierte un valor en USD a la moneda de vista configurada en Gestión.
-   Devuelve null si la vista está en USD o la tasa no es válida. */
-function usdToVista(usd){
-  const cfg = DB.config || {};
-  if (!cfg.monedaVistaId) return null;
-  const met = getMetodo(cfg.monedaVistaId);
-  const tasa = Number(cfg.tasaVista) || 0;
-  if (!met || tasa <= 0) return null;
-  // Inversa del modo del método: si local→USD divide, USD→local multiplica
-  return met.modoTasa === 'multiplicar' ? usd / tasa : usd * tasa;
+/* a - b, mapa por mapa (por moneda) */
+function restarMapas(a, b){
+  const out = {};
+  const keys = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
+  keys.forEach(k => {
+    const v = round2((a[k] || 0) - (b[k] || 0));
+    out[k] = v;
+  });
+  return out;
 }
 
-/* Formatea un valor USD en la moneda de vista elegida */
-function fmtVista(usd){
-  const v = usdToVista(usd);
-  if (v == null) return fmtUSD(usd);
-  const met = getMetodo(DB.config.monedaVistaId);
-  return fmtNum(v) + ' ' + met.nombre;
+/* Suma acumulada de varios mapas por moneda */
+function acumularMapas(mapas){
+  const out = {};
+  (mapas || []).forEach(m => {
+    Object.keys(m || {}).forEach(k => { out[k] = round2((out[k] || 0) + (Number(m[k]) || 0)); });
+  });
+  return out;
 }
 
-/* Etiqueta de la tasa según el modo del método */
-function tasaLabel(met){
-  return met.modoTasa === 'multiplicar'
-    ? 'Tasa (USD por 1 ' + met.nombre + ')'
-    : 'Tasa (' + met.nombre + ' por 1 USD)';
+function round2(n){ return Math.round((Number(n) || 0) * 100) / 100; }
+
+/* Descarta las entradas ~0 de un mapa por moneda */
+function limpiarMapa(map){
+  const out = {};
+  Object.keys(map || {}).forEach(k => { if (Math.abs(map[k]) > 0.009) out[k] = map[k]; });
+  return out;
 }
 
 /* ---- Accesores básicos ---- */
+function getMoneda(id){ return DB.monedas.find(m => m.id === id); }
 function getCliente(id){ return DB.clientes.find(c => c.id === id); }
 function getPlataforma(id){ return DB.plataformas.find(p => p.id === id); }
 function getMetodo(id){ return DB.metodos.find(m => m.id === id); }
 function getCuenta(id){ return DB.cuentas.find(c => c.id === id); }
 
-/* ============ Cálculos derivados ============ */
+function monedaCodigo(id){ const m = getMoneda(id); return m ? m.codigo : '—'; }
 
-/* Planes de un cliente: agrupa todos los planes pagados por plataforma
-   y toma el vencimiento más reciente de cada una. */
-function clientePlanes(clienteId){
-  const regs = DB.registros.filter(r => r.clienteId === clienteId);
-  const porPlat = {};
-  regs.forEach(r => {
-    (r.planes || []).forEach(p => {
-      const k = p.plataformaId;
-      if (!porPlat[k] || p.vence > porPlat[k].vence) {
-        porPlat[k] = { plataformaId: k, nombre: p.nombre, vence: p.vence, precio: p.precio, dias: p.dias };
-      }
-    });
-  });
-  return Object.values(porPlat).sort((a,b) => a.vence < b.vence ? -1 : 1);
+/* Formatea un monto en su moneda: "$12.00" para USD, "45.000 COP" para el resto */
+function fmtMoneda(monto, monedaId){
+  const cod = monedaCodigo(monedaId);
+  if (cod === 'USD') return '$' + (Number(monto)||0).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 });
+  return fmtNum(monto) + ' ' + cod;
 }
 
-/* Saldo acumulado del cliente: pagado - esperado (negativo = debe) */
+/* Formatea un mapa {monedaId: monto} como "45.000 COP · $10.00", omitiendo ceros */
+function fmtMapa(map, opts){
+  opts = opts || {};
+  const entries = Object.keys(map || {})
+    .filter(k => opts.keepZero || Math.abs(map[k]) > 0.009)
+    .sort((a,b) => monedaCodigo(a).localeCompare(monedaCodigo(b)));
+  if (!entries.length) return opts.zeroText || fmtMoneda(0, null);
+  return entries.map(k => fmtMoneda(map[k], k)).join(opts.sep || ' · ');
+}
+
+/* ============ Cálculos derivados ============ */
+
+/* Suscripciones (planes que usa) de un cliente, enriquecidas con datos del plan y la cuenta */
+function clienteSuscripciones(clienteId){
+  const c = getCliente(clienteId);
+  if (!c) return [];
+  return (c.suscripciones || []).map(s => {
+    const plat = getPlataforma(s.plataformaId);
+    const cta = getCuenta(s.cuentaId);
+    return {
+      id: s.id, cuentaId: s.cuentaId, plataformaId: s.plataformaId,
+      nombre: plat ? plat.nombre : '(plan eliminado)',
+      monedaId: plat ? plat.monedaId : null,
+      precio: plat ? Number(plat.precio) || 0 : 0,
+      vence: s.vence || null,
+      cuentaCorreo: cta ? cta.correo : null
+    };
+  }).sort((a,b) => {
+    if (!a.vence && !b.vence) return 0;
+    if (!a.vence) return 1;
+    if (!b.vence) return -1;
+    return a.vence < b.vence ? -1 : 1;
+  });
+}
+
+/* Precio total esperado (por moneda) de todas las suscripciones de un cliente */
+function clienteEsperado(clienteId){
+  const subs = clienteSuscripciones(clienteId);
+  return sumarPorMoneda(subs.map(s => ({ monedaId: s.monedaId, monto: s.precio })));
+}
+
+/* Saldo acumulado del cliente por moneda: pagado - esperado (negativo = debe) */
 function clienteSaldo(clienteId){
-  return DB.registros
-    .filter(r => r.clienteId === clienteId)
-    .reduce((s, r) => s + (Number(r.saldo) || 0), 0);
+  const mapas = DB.registros.filter(r => r.clienteId === clienteId).map(r => r.saldo || {});
+  return limpiarMapa(acumularMapas(mapas));
 }
 
 /* Estado general del cliente */
 function clienteEstado(clienteId){
-  const planes = clientePlanes(clienteId);
+  const subs = clienteSuscripciones(clienteId);
   const saldo = clienteSaldo(clienteId);
-  if (!planes.length) return { label: 'Sin planes', cls: 'gray' };
-  const algunoVencido = planes.some(p => daysLeft(p.vence) < 0);
+  if (!subs.length) return { label: 'Sin planes', cls: 'gray' };
+  const conVence = subs.filter(s => s.vence);
+  const algunoVencido = conVence.some(s => daysLeft(s.vence) < 0);
   if (algunoVencido) return { label: 'Vencido', cls: 'red' };
-  if (saldo < -0.009) return { label: 'Debe ' + fmtUSD(Math.abs(saldo)), cls: 'red' };
-  const proximo = planes.some(p => daysLeft(p.vence) <= 1);
+  const debe = Object.keys(saldo).some(k => saldo[k] < -0.009);
+  if (debe) {
+    const deudas = {}; Object.keys(saldo).forEach(k => { if (saldo[k] < -0.009) deudas[k] = -saldo[k]; });
+    return { label: 'Debe ' + fmtMapa(deudas), cls: 'red' };
+  }
+  if (subs.some(s => !s.vence)) return { label: 'Sin activar', cls: 'amber' };
+  const proximo = conVence.some(s => daysLeft(s.vence) <= 1);
   if (proximo) return { label: 'Por vencer', cls: 'amber' };
   return { label: 'Al día', cls: 'green' };
 }
 
-/* ---- Totales financieros ---- */
-function totalIngresos(){ return DB.registros.reduce((s, r) => s + (Number(r.totalUsd) || 0), 0); }
-function totalEgresos(){ return DB.recargas.reduce((s, r) => s + (Number(r.totalUsd) || 0), 0); }
+/* ---- Totales financieros (por moneda) ---- */
+function totalIngresos(){ return acumularMapas(DB.registros.map(r => r.pagado || {})); }
+function totalEgresos(){ return acumularMapas(DB.recargas.map(r => r.total || {})); }
+function balanceGeneral(){ return restarMapas(totalIngresos(), totalEgresos()); }
 
-/* Cartera: acumulado por método en su moneda original (ingresos - egresos) */
+/* Cartera: acumulado por método en su moneda (ingresos - egresos) */
 function cartera(){
   const map = {};
   const add = (pagos, sign) => {
     (pagos || []).forEach(p => {
       const k = p.metodoId;
-      if (!map[k]) map[k] = { nombre: p.nombre, monto: 0, usd: 0 };
+      if (!map[k]) map[k] = { nombre: p.nombre, monedaId: p.monedaId, monto: 0 };
       map[k].monto += sign * (Number(p.monto) || 0);
-      map[k].usd   += sign * (Number(p.usd) || 0);
     });
   };
   DB.registros.forEach(r => add(r.pagos, 1));
   DB.recargas.forEach(r => add(r.pagos, -1));
-  return Object.values(map).filter(m => Math.abs(m.monto) > 0.001 || Math.abs(m.usd) > 0.001);
+  return Object.values(map).filter(m => Math.abs(m.monto) > 0.009);
 }
 
 /* Ranking de plataformas vendidas. periodo: 'mes' | '30' | 'todo' */
@@ -170,26 +317,27 @@ function rankingPlataformas(periodo){
   const map = {};
   DB.registros.forEach(r => {
     if (desde && new Date(r.fecha.slice(0,10) + 'T00:00:00') < desde) return;
-    (r.planes || []).forEach(p => {
+    (r.items || []).forEach(p => {
       const k = p.plataformaId;
-      if (!map[k]) map[k] = { nombre: p.nombre, ventas: 0, usd: 0 };
+      if (!map[k]) map[k] = { nombre: p.nombre, monedaId: p.monedaId, ventas: 0, monto: 0 };
       map[k].ventas++;
-      map[k].usd += Number(p.precio) || 0;
+      map[k].monto += Number(p.precio) || 0;
     });
   });
-  return Object.values(map).sort((a,b) => b.usd - a.usd);
+  return Object.values(map).sort((a,b) => b.ventas - a.ventas);
 }
 
 /* ============ Alertas ============ */
-/* Devuelve {clientesVencidos, clientesPorVencer, recargasPorVencer} */
+/* Devuelve {cliVencidos, cliPorVencer, recPorVencer} */
 function calcAlertas(){
   const cliVencidos = [];
   const cliPorVencer = [];
   DB.clientes.forEach(c => {
-    clientePlanes(c.id).forEach(p => {
-      const d = daysLeft(p.vence);
-      if (d < 0) cliVencidos.push({ cliente: c, plan: p, dias: d });
-      else if (d <= 1) cliPorVencer.push({ cliente: c, plan: p, dias: d });
+    clienteSuscripciones(c.id).forEach(s => {
+      if (!s.vence) return;
+      const d = daysLeft(s.vence);
+      if (d < 0) cliVencidos.push({ cliente: c, plan: s, dias: d });
+      else if (d <= 1) cliPorVencer.push({ cliente: c, plan: s, dias: d });
     });
   });
   const recPorVencer = [];

@@ -11,16 +11,16 @@ V._rankPeriodo = 'mes';
 V.dashboard = function(){
   const ing = totalIngresos();
   const egr = totalEgresos();
-  const bal = ing - egr;
+  const bal = balanceGeneral();
   const cart = cartera();
   const rank = rankingPlataformas(V._rankPeriodo);
-  const maxUsd = rank.length ? Math.max(...rank.map(r => r.usd), 0.01) : 1;
+  const maxVenta = rank.length ? Math.max(...rank.map(r => r.ventas), 1) : 1;
   const nAlertas = alertCount();
 
-  const cfg = DB.config;
-  const monedas = DB.metodos.filter(m => m.requiereTasa && (m.activo || m.id === cfg.monedaVistaId));
-  const metVista = cfg.monedaVistaId ? getMetodo(cfg.monedaVistaId) : null;
-  const vistaActiva = usdToVista(1) != null;
+  // monedas con algún movimiento (ingreso o egreso)
+  const monIds = Array.from(new Set([...Object.keys(ing), ...Object.keys(egr)]))
+    .filter(k => Math.abs(ing[k]||0) > 0.009 || Math.abs(egr[k]||0) > 0.009)
+    .sort((a,b) => monedaCodigo(a).localeCompare(monedaCodigo(b)));
 
   let html = `
   <div class="page-head">
@@ -30,32 +30,7 @@ V.dashboard = function(){
     </div>
   </div>
 
-  <div class="card" style="padding:12px">
-    <div style="display:flex;gap:8px;align-items:flex-end">
-      <div style="flex:1">
-        <label style="margin-top:0">Ver montos en</label>
-        <select onchange="V._setMonedaVista(this.value)">
-          <option value="">USD (dólares)</option>
-          ${monedas.map(m => `<option value="${m.id}" ${cfg.monedaVistaId===m.id?'selected':''}>${esc(m.nombre)}</option>`).join('')}
-        </select>
-      </div>
-      ${metVista ? `
-      <div style="flex:1">
-        <label style="margin-top:0">${esc(tasaLabel(metVista))}</label>
-        <input type="number" step="any" min="0" inputmode="decimal" value="${esc(cfg.tasaVista)}"
-          placeholder="Tasa del día" onchange="DB.config.tasaVista=this.value;dbSave();App.nav('dashboard')">
-      </div>` : ''}
-    </div>
-    ${metVista && !vistaActiva ? '<div style="font-size:.78rem;color:var(--amber);margin-top:8px">Ingresa la tasa del día para ver los montos en ' + esc(metVista.nombre) + '.</div>' : ''}
-  </div>
-
-  <div class="grid3">
-    <div class="kpi"><div class="lbl">Ingresos</div><div class="val mono" ${vistaActiva ? 'style="font-size:.95rem"' : ''}>${fmtVista(ing)}</div></div>
-    <div class="kpi"><div class="lbl">Egresos</div><div class="val mono" ${vistaActiva ? 'style="font-size:.95rem"' : ''}>${fmtVista(egr)}</div></div>
-    <div class="kpi ${bal >= 0 ? 'green' : 'red'}"><div class="lbl">Balance</div><div class="val mono" ${vistaActiva ? 'style="font-size:.95rem"' : ''}>${fmtVista(bal)}</div></div>
-  </div>
-
-  <div class="grid2" style="margin-top:10px">
+  <div class="grid2">
     <button class="kpi" style="text-align:left" onclick="App.nav('clientes')">
       <div class="lbl">Clientes</div><div class="val">${DB.clientes.length}</div>
     </button>
@@ -64,27 +39,51 @@ V.dashboard = function(){
     </button>
   </div>
 
-  <div class="sect"><h2>Cartera por moneda</h2></div>
-  <div class="card">`;
+  <div class="sect"><h2>Balance por moneda</h2></div>`;
 
-  if (!cart.length) {
-    html += `<div class="empty" style="padding:18px">${I.wallet}<p>Aún no hay movimientos registrados</p></div>`;
+  if (!monIds.length) {
+    html += `<div class="card"><div class="empty" style="padding:18px">${I.wallet}<p>Aún no hay movimientos registrados</p></div></div>`;
   } else {
-    cart.forEach(m => {
+    monIds.forEach(k => {
+      const i = ing[k] || 0, e = egr[k] || 0, b = bal[k] || 0;
       html += `
-      <div class="card-row" style="padding:7px 0;border-bottom:1px solid var(--border)">
-        <span style="font-weight:600">${esc(m.nombre)}</span>
-        <span style="text-align:right">
-          <span class="mono" style="font-weight:700">${fmtNum(m.monto)}</span>
-          <span class="mono" style="color:var(--muted);font-size:.78rem;display:block">≈ ${fmtVista(m.usd)}</span>
-        </span>
+      <div class="card" style="padding:12px 14px;margin-bottom:9px">
+        <div class="card-row">
+          <span style="font-weight:750;font-size:1rem">${esc(monedaCodigo(k))}</span>
+          <span class="mono" style="font-weight:750;color:${b >= 0 ? 'var(--green)' : 'var(--red)'}">${fmtMoneda(b, k)}</span>
+        </div>
+        <div style="font-size:.78rem;color:var(--muted);margin-top:3px">
+          Ingresos <span class="mono" style="color:var(--green)">${fmtMoneda(i, k)}</span>
+          · Egresos <span class="mono" style="color:var(--red)">${fmtMoneda(e, k)}</span>
+        </div>
       </div>`;
     });
-    const totalCart = cart.reduce((s,m) => s + m.usd, 0);
-    html += `<div class="card-row" style="padding-top:10px"><span style="font-weight:750">Total equivalente</span><span class="mono" style="font-weight:750">${fmtVista(totalCart)}</span></div>`;
   }
-  html += `</div>
 
+  html += `<div class="sect"><h2>Cartera por moneda</h2></div>`;
+
+  if (!cart.length) {
+    html += `<div class="card"><div class="empty" style="padding:18px">${I.wallet}<p>Aún no hay movimientos en tus métodos de pago</p></div></div>`;
+  } else {
+    // agrupar métodos por moneda
+    const porMon = {};
+    cart.forEach(m => { (porMon[m.monedaId] = porMon[m.monedaId] || []).push(m); });
+    Object.keys(porMon).sort((a,b) => monedaCodigo(a).localeCompare(monedaCodigo(b))).forEach(k => {
+      const metodos = porMon[k];
+      const subtotal = metodos.reduce((s,m) => s + m.monto, 0);
+      html += `<div class="card">`;
+      metodos.forEach(m => {
+        html += `
+        <div class="card-row" style="padding:7px 0;border-bottom:1px solid var(--border)">
+          <span style="font-weight:600">${esc(m.nombre)}</span>
+          <span class="mono" style="font-weight:700">${fmtMoneda(m.monto, k)}</span>
+        </div>`;
+      });
+      html += `<div class="card-row" style="padding-top:10px"><span style="font-weight:750">Total ${esc(monedaCodigo(k))}</span><span class="mono" style="font-weight:750">${fmtMoneda(subtotal, k)}</span></div></div>`;
+    });
+  }
+
+  html += `
   <div class="sect"><h2>Planes más vendidos</h2></div>
   <div class="seg">
     <button class="${V._rankPeriodo==='mes'?'active':''}" onclick="V._rankPeriodo='mes';App.nav('dashboard')">Mes actual</button>
@@ -101,9 +100,9 @@ V.dashboard = function(){
       <div class="rank-row">
         <div class="rr-top">
           <span class="n">${esc(r.nombre)}</span>
-          <span class="v mono">${r.ventas} venta${r.ventas!==1?'s':''} · ${fmtVista(r.usd)}</span>
+          <span class="v mono">${r.ventas} venta${r.ventas!==1?'s':''} · ${fmtMoneda(r.monto, r.monedaId)}</span>
         </div>
-        <div class="bar"><div style="width:${Math.round(r.usd / maxUsd * 100)}%"></div></div>
+        <div class="bar"><div style="width:${Math.round(r.ventas / maxVenta * 100)}%"></div></div>
       </div>`;
     });
   }
@@ -111,25 +110,14 @@ V.dashboard = function(){
   App.render(html);
 };
 
-V._setMonedaVista = function(id){
-  DB.config.monedaVistaId = id || null;
-  dbSave();
-  App.nav('dashboard');
-};
-
 /* =================================================================
-   CLIENTES (vista consolidada por cliente — módulo "Cuentas")
+   CLIENTES (vista consolidada por cliente)
 ================================================================= */
 V._cliSearch = '';
 V._cliExpanded = null;
 V._cliHist = null;
 
 V.clientes = function(){
-  const q = V._cliSearch.toLowerCase();
-  const lista = DB.clientes
-    .filter(c => !q || c.nombre.toLowerCase().includes(q) || String(c.numero).includes(q))
-    .sort((a,b) => a.nombre.localeCompare(b.nombre));
-
   let html = `
   <div class="page-head">
     <div><h1>Clientes</h1><div class="sub">${DB.clientes.length} registrados</div></div>
@@ -157,10 +145,10 @@ V._renderCliList = function(){
     html = `<div class="empty">${I.users}<p>${DB.clientes.length ? 'Sin resultados para la búsqueda' : 'Aún no tienes clientes. Toca "Nuevo" para agregar el primero.'}</p></div>`;
   }
   lista.forEach(c => {
-    const planes = clientePlanes(c.id);
+    const subs = clienteSuscripciones(c.id);
     const estado = clienteEstado(c.id);
-    const activos = planes.filter(p => daysLeft(p.vence) >= 0);
-    const proximo = planes.length ? planes[0] : null;
+    const activos = subs.filter(p => p.vence && daysLeft(p.vence) >= 0);
+    const proximo = subs.find(p => p.vence);
     const expanded = V._cliExpanded === c.id;
 
     html += `
@@ -170,7 +158,7 @@ V._renderCliList = function(){
         <div style="flex:1;min-width:0">
           <div style="font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.nombre)}</div>
           <div style="font-size:.78rem;color:var(--muted)">
-            ${activos.length} plan${activos.length!==1?'es':''} activo${activos.length!==1?'s':''}${proximo ? ' · próx. venc. ' + daysText(daysLeft(proximo.vence)).toLowerCase() : ''}
+            ${subs.length} plan${subs.length!==1?'es':''}${proximo ? ' · próx. venc. ' + daysText(daysLeft(proximo.vence)).toLowerCase() : ''}
           </div>
         </div>
         <span class="chip ${estado.cls}">${estado.label}</span>
@@ -179,25 +167,24 @@ V._renderCliList = function(){
     if (expanded) {
       const saldo = clienteSaldo(c.id);
       html += `<div class="expand">`;
-      if (!planes.length) {
-        html += `<p style="color:var(--muted);font-size:.85rem;padding:6px 0">Sin planes registrados. Registra un pago para empezar.</p>`;
+      if (!subs.length) {
+        html += `<p style="color:var(--muted);font-size:.85rem;padding:6px 0">Sin planes. Edita el cliente para asignarle las cuentas y planes que usa.</p>`;
       }
-      planes.forEach(p => {
-        const d = daysLeft(p.vence);
+      subs.forEach(p => {
+        const d = p.vence ? daysLeft(p.vence) : null;
         html += `
         <div class="plan-row">
           <div>
             <div class="pname">${esc(p.nombre)}</div>
-            <div class="pmeta">${fmtUSD(p.precio)} · vence ${fmtDate(p.vence)}</div>
+            <div class="pmeta">${fmtMoneda(p.precio, p.monedaId)}${p.cuentaCorreo ? ' · ' + esc(p.cuentaCorreo) : ''}${p.vence ? ' · vence ' + fmtDate(p.vence) : ''}</div>
           </div>
-          <span class="days-pill ${daysPillClass(d)}">${daysText(d)}</span>
+          ${p.vence ? `<span class="days-pill ${daysPillClass(d)}">${daysText(d)}</span>` : '<span class="chip amber">Sin activar</span>'}
         </div>`;
       });
-      if (Math.abs(saldo) > 0.009) {
-        html += `<div class="note" style="color:${saldo < 0 ? 'var(--red)' : 'var(--green)'}">
-          ${saldo < 0 ? 'Debe ' + fmtUSD(Math.abs(saldo)) : 'Saldo a favor de ' + fmtUSD(saldo)}
-        </div>`;
-      }
+      const debe = {}; const favor = {};
+      Object.keys(saldo).forEach(k => { if (saldo[k] < 0) debe[k] = -saldo[k]; else favor[k] = saldo[k]; });
+      if (Object.keys(debe).length) html += `<div class="note" style="color:var(--red)">Debe ${fmtMapa(debe)}</div>`;
+      if (Object.keys(favor).length) html += `<div class="note" style="color:var(--green)">Saldo a favor: ${fmtMapa(favor)}</div>`;
       html += `
       <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
         <button class="btn sm wa-btn" onclick="event.stopPropagation();WaMsg.open('${c.id}')">${I.wa} WhatsApp</button>
@@ -210,18 +197,23 @@ V._renderCliList = function(){
         html += `<div style="margin-top:12px">`;
         if (!regs.length) html += `<p style="color:var(--muted);font-size:.83rem">Sin pagos registrados.</p>`;
         regs.forEach(r => {
+          const saldoR = limpiarMapa(r.saldo || {});
+          const saldoTxt = Object.keys(saldoR).map(k => {
+            const v = saldoR[k];
+            return `<span style="color:${v < 0 ? 'var(--red)' : 'var(--green)'}">${v < 0 ? 'debió ' : 'a favor '}${fmtMoneda(Math.abs(v), k)}</span>`;
+          }).join(' · ');
           html += `
           <div class="sub-card" style="margin-bottom:8px">
             <div class="card-row">
               <span style="font-size:.83rem;font-weight:650">${fmtDate(r.fecha)}</span>
-              <span class="mono" style="font-weight:700">${fmtUSD(r.totalUsd)}</span>
+              <span class="mono" style="font-weight:700">${fmtMapa(r.pagado, {zeroText:'—'})}</span>
             </div>
             <div style="font-size:.78rem;color:var(--muted);margin-top:3px">
-              ${(r.planes||[]).map(p => esc(p.nombre) + ' (' + p.dias + 'd)').join(' · ')}
+              ${(r.items||[]).map(p => esc(p.nombre) + ' (+' + p.dias + 'd)').join(' · ') || 'Sin planes'}
             </div>
             <div style="font-size:.78rem;color:var(--muted)">
-              ${(r.pagos||[]).map(p => esc(p.nombre) + ' ' + fmtNum(p.monto)).join(' · ')}
-              ${Math.abs(r.saldo) > 0.009 ? ' · <span style="color:' + (r.saldo < 0 ? 'var(--red)' : 'var(--green)') + '">' + (r.saldo < 0 ? 'quedó debiendo ' + fmtUSD(Math.abs(r.saldo)) : 'a favor ' + fmtUSD(r.saldo)) + '</span>' : ''}
+              ${(r.pagos||[]).map(p => esc(p.nombre) + ' ' + fmtMoneda(p.monto, p.monedaId)).join(' · ')}
+              ${saldoTxt ? ' · ' + saldoTxt : ''}
             </div>
           </div>`;
         });
@@ -240,43 +232,130 @@ V._toggleCli = function(id){
   V._renderCliList();
 };
 
-/* ---- Formulario de cliente ---- */
+/* ---- Formulario de cliente (datos + cuentas/planes que usa) ---- */
 const ClienteForm = {
   editId: null,
   onSaved: null,
+  nombre: '', numero: '', notas: '',
+  bloques: [],   // [{cuentaId, plataformaIds:[]}]  — un bloque por cuenta que usa el cliente
 
   open(id, onSaved){
     ClienteForm.editId = id || null;
     ClienteForm.onSaved = onSaved || null;
     const c = id ? getCliente(id) : {};
+    ClienteForm.nombre = c.nombre || '';
+    ClienteForm.numero = c.numero || '';
+    ClienteForm.notas = c.notas || '';
+    // Reconstruir bloques desde las suscripciones actuales, agrupadas por cuenta
+    const byCta = {};
+    (c.suscripciones || []).forEach(s => {
+      const k = s.cuentaId || '';
+      (byCta[k] = byCta[k] || []).push(s.plataformaId);
+    });
+    ClienteForm.bloques = Object.keys(byCta).map(k => ({ cuentaId: k, plataformaIds: byCta[k] }));
+    if (!ClienteForm.bloques.length) ClienteForm.bloques = [];
+    ClienteForm.render();
+  },
+
+  render(){
+    const id = ClienteForm.editId;
+    let bloquesHtml = '';
+    ClienteForm.bloques.forEach((b, i) => {
+      const ctasOpts = DB.cuentas.map(ct => `<option value="${ct.id}" ${b.cuentaId===ct.id?'selected':''}>${esc(ct.correo)}</option>`).join('');
+      const cta = getCuenta(b.cuentaId);
+      let plansHtml = '';
+      if (cta) {
+        const plats = (cta.plataformaIds || []).map(pid => getPlataforma(pid)).filter(p => p && (p.activo || b.plataformaIds.includes(p.id)));
+        if (!plats.length) {
+          plansHtml = `<p style="font-size:.8rem;color:var(--muted);margin-top:8px">Esta cuenta no tiene planes activos. Agrégalos en Cuentas propias.</p>`;
+        } else {
+          plansHtml = plats.map(p => `
+            <label style="display:flex;align-items:center;gap:9px;margin-top:9px;font-size:.88rem;color:var(--text);font-weight:500">
+              <input type="checkbox" class="cf-plan-${i}" value="${p.id}" ${b.plataformaIds.includes(p.id)?'checked':''}
+                onchange="ClienteForm.togglePlan(${i},'${p.id}',this.checked)">
+              ${esc(p.nombre)} <span style="color:var(--muted)">· ${fmtMoneda(p.precio, p.monedaId)}</span>
+            </label>`).join('');
+        }
+      } else if (b.cuentaId === '' && b.plataformaIds.length) {
+        // bloque migrado sin cuenta asignada
+        plansHtml = `<p style="font-size:.8rem;color:var(--amber);margin-top:8px">${b.plataformaIds.length} plan(es) sin cuenta asignada. Elige una cuenta arriba.</p>`;
+      } else {
+        plansHtml = `<p style="font-size:.8rem;color:var(--muted);margin-top:8px">Elige una cuenta para ver sus planes.</p>`;
+      }
+      bloquesHtml += `
+      <div class="sub-card">
+        <button class="remove" onclick="ClienteForm.bloques.splice(${i},1);ClienteForm.render()">${I.x}</button>
+        <label>Cuenta que usa</label>
+        <select onchange="ClienteForm.bloques[${i}].cuentaId=this.value;ClienteForm.render()">
+          <option value="">Seleccionar cuenta…</option>${ctasOpts}
+        </select>
+        ${cta || b.plataformaIds.length ? `<label>Planes que usa de esta cuenta</label>${plansHtml}` : plansHtml}
+      </div>`;
+    });
+
+    const sinCuentas = !DB.cuentas.length;
+
     Modal.open(`
       <div class="modal-head"><h2>${id ? 'Editar cliente' : 'Nuevo cliente'}</h2>
         <button class="icon-btn" onclick="Modal.close()">${I.x}</button></div>
       <label>Nombre *</label>
-      <input id="cf-nombre" value="${esc(c.nombre||'')}" placeholder="Nombre del cliente">
+      <input id="cf-nombre" value="${esc(ClienteForm.nombre)}" placeholder="Nombre del cliente"
+        oninput="ClienteForm.nombre=this.value">
       <label>Teléfono (WhatsApp) *</label>
-      <input id="cf-numero" type="tel" value="${esc(c.numero||'')}" placeholder="Ej: 584121234567">
+      <input id="cf-numero" type="tel" value="${esc(ClienteForm.numero)}" placeholder="Ej: 584121234567"
+        oninput="ClienteForm.numero=this.value">
       <label>Notas</label>
-      <textarea id="cf-notas" rows="2" placeholder="Observaciones (opcional)">${esc(c.notas||'')}</textarea>
+      <textarea id="cf-notas" rows="2" placeholder="Observaciones (opcional)" oninput="ClienteForm.notas=this.value">${esc(ClienteForm.notas)}</textarea>
+
+      <div class="sect"><h2>Cuentas y planes que usa</h2></div>
+      ${sinCuentas ? `<div class="note">Primero crea cuentas propias (Menú → Cuentas) para poder asignarle planes al cliente.</div>` : ''}
+      ${bloquesHtml || `<p style="font-size:.83rem;color:var(--muted);margin-bottom:10px">Aún no le has asignado planes. Agrega una cuenta para empezar.</p>`}
+      ${!sinCuentas ? `<button class="add-row" onclick="ClienteForm.bloques.push({cuentaId:'',plataformaIds:[]});ClienteForm.render()">${I.plus} Agregar cuenta</button>` : ''}
+
       <div class="modal-actions">
         ${id ? `<button class="btn danger" onclick="ClienteForm.remove()">${I.trash} Eliminar</button>` : ''}
         <button class="btn" onclick="ClienteForm.save()">Guardar</button>
       </div>`);
   },
 
+  togglePlan(i, platId, checked){
+    const b = ClienteForm.bloques[i];
+    if (!b) return;
+    if (checked) { if (!b.plataformaIds.includes(platId)) b.plataformaIds.push(platId); }
+    else b.plataformaIds = b.plataformaIds.filter(x => x !== platId);
+  },
+
   save(){
-    const nombre = document.getElementById('cf-nombre').value.trim();
-    const numero = document.getElementById('cf-numero').value.trim();
-    const notas = document.getElementById('cf-notas').value.trim();
+    const nombre = (ClienteForm.nombre || '').trim();
+    const numero = (ClienteForm.numero || '').trim();
+    const notas = (ClienteForm.notas || '').trim();
     if (!nombre) return toast('El nombre es obligatorio', true);
     if (!numero) return toast('El teléfono es obligatorio', true);
+
+    const c = ClienteForm.editId ? getCliente(ClienteForm.editId) : null;
+    const previas = (c && c.suscripciones) || [];
+    // reconstruir suscripciones preservando vence de las que ya existían
+    const nuevas = [];
+    ClienteForm.bloques.forEach(b => {
+      const cuentaId = b.cuentaId || null;
+      b.plataformaIds.forEach(platId => {
+        const prev = previas.find(s => (s.cuentaId||null) === cuentaId && s.plataformaId === platId)
+                  || previas.find(s => s.plataformaId === platId && !nuevas.some(n => n.plataformaId === platId && (n.cuentaId||null) === (s.cuentaId||null)));
+        nuevas.push({
+          id: prev ? prev.id : uid(),
+          cuentaId, plataformaId: platId,
+          vence: prev ? (prev.vence || null) : null,
+          fecha: prev ? (prev.fecha || todayISO()) : todayISO()
+        });
+      });
+    });
+
     let saved;
-    if (ClienteForm.editId) {
-      const c = getCliente(ClienteForm.editId);
-      c.nombre = nombre; c.numero = numero; c.notas = notas;
+    if (c) {
+      c.nombre = nombre; c.numero = numero; c.notas = notas; c.suscripciones = nuevas;
       saved = c;
     } else {
-      saved = { id: uid(), nombre, numero, notas, fecha: todayISO() };
+      saved = { id: uid(), nombre, numero, notas, fecha: todayISO(), suscripciones: nuevas };
       DB.clientes.push(saved);
     }
     dbSave();
@@ -304,10 +383,10 @@ const ClienteForm = {
 const WaMsg = {
   open(clienteId){
     const c = getCliente(clienteId);
-    const planes = clientePlanes(clienteId);
+    const planes = clienteSuscripciones(clienteId);
     let opciones = '';
     planes.forEach((p, i) => {
-      opciones += `<option value="${i}">${esc(p.nombre)} — vence ${fmtDate(p.vence)}</option>`;
+      opciones += `<option value="${i}">${esc(p.nombre)}${p.vence ? ' — vence ' + fmtDate(p.vence) : ''}</option>`;
     });
     Modal.open(`
       <div class="modal-head"><h2>WhatsApp a ${esc(c.nombre)}</h2>
@@ -326,19 +405,20 @@ const WaMsg = {
   },
   send(clienteId){
     const c = getCliente(clienteId);
-    const planes = clientePlanes(clienteId);
+    const planes = clienteSuscripciones(clienteId);
     const tipo = document.getElementById('wa-tipo').value;
     let texto = '';
     if (tipo !== 'libre') {
       const sel = document.getElementById('wa-plan');
       const p = planes[sel ? Number(sel.value) : 0] || { nombre: 'su plan', vence: todayISO() };
-      const d = daysLeft(p.vence);
+      const venceF = p.vence || todayISO();
+      const d = daysLeft(venceF);
       texto = fillTemplate(DB.templates[tipo], {
         nombre: c.nombre,
         plan: p.nombre,
-        fecha: fmtDate(p.vence),
+        fecha: fmtDate(venceF),
         dias: Math.max(d, 0),
-        cuando: d === 0 ? 'hoy' : (d === 1 ? 'mañana' : 'el ' + fmtDate(p.vence))
+        cuando: d === 0 ? 'hoy' : (d === 1 ? 'mañana' : 'el ' + fmtDate(venceF))
       });
     }
     window.open(waLink(c.numero, texto), '_blank');
@@ -348,35 +428,43 @@ const WaMsg = {
 
 /* =================================================================
    REGISTRO DE PAGO (pestaña central)
+   Se paga contra los planes que el cliente YA tiene registrados:
+   se elige a cuáles se les añaden días y cuánto se pagó.
 ================================================================= */
 const RegForm = {
   clienteId: '',
   fecha: '',
-  planes: [],   // {plataformaId, dias}
-  pagos: [],    // {metodoId, monto, tasa}
+  items: {},    // suscripcionId -> {sel, dias}
+  pagos: [],    // {metodoId, monto}
 
   reset(){
     RegForm.clienteId = '';
     RegForm.fecha = todayISO();
-    RegForm.planes = [{ plataformaId: '', dias: 30 }];
-    RegForm.pagos = [{ metodoId: '', monto: '', tasa: '' }];
+    RegForm.items = {};
+    RegForm.pagos = [{ metodoId: '', monto: '' }];
+  },
+
+  setCliente(id){
+    RegForm.clienteId = id;
+    RegForm.items = {};
+    clienteSuscripciones(id).forEach(s => { RegForm.items[s.id] = { sel: true, dias: 30 }; });
+    App.nav('registro');
   }
 };
 
 V.registro = function(){
   if (!RegForm.fecha) RegForm.reset();
-  const plats = DB.plataformas.filter(p => p.activo);
   const mets = DB.metodos.filter(m => m.activo);
 
   let html = `
   <div class="page-head">
-    <div><h1>Registrar pago</h1><div class="sub">Venta a cliente</div></div>
+    <div><h1>Registrar pago</h1><div class="sub">Renovación de planes del cliente</div></div>
   </div>`;
 
-  if (!plats.length) {
-    html += `<div class="card"><div class="empty" style="padding:20px">${I.tv}
-      <p>Primero crea tus planes en el catálogo de plataformas.</p>
-      <button class="btn sm" style="margin-top:12px" onclick="App.nav('plataformas')">Ir a Plataformas</button>
+  if (!DB.clientes.length) {
+    html += `<div class="card"><div class="empty" style="padding:20px">${I.users}
+      <p>Primero registra un cliente con las cuentas y planes que usa.</p>
+      <button class="btn sm" style="margin-top:12px" onclick="ClienteForm.open(null,(c)=>{RegForm.setCliente(c.id)})">Nuevo cliente</button>
     </div></div>`;
     return App.render(html);
   }
@@ -387,68 +475,68 @@ V.registro = function(){
   html += `
   <label>Cliente *</label>
   <div style="display:flex;gap:8px">
-    <select id="rf-cliente" onchange="RegForm.clienteId=this.value">
+    <select id="rf-cliente" onchange="RegForm.setCliente(this.value)">
       <option value="">Seleccionar cliente…</option>${clientesOpts}
     </select>
     <button class="icon-btn" style="width:46px;height:46px;flex-shrink:0" title="Nuevo cliente"
-      onclick="ClienteForm.open(null, (c)=>{RegForm.clienteId=c.id;App.nav('registro')})">${I.plus}</button>
+      onclick="ClienteForm.open(null, (c)=>{RegForm.setCliente(c.id)})">${I.plus}</button>
   </div>
 
   <label>Fecha de pago</label>
-  <input type="date" id="rf-fecha" value="${RegForm.fecha}" onchange="RegForm.fecha=this.value;V._regCalc()">
+  <input type="date" id="rf-fecha" value="${RegForm.fecha}" onchange="RegForm.fecha=this.value;App.nav('registro')">`;
 
-  <div class="sect"><h2>Planes pagados</h2></div>`;
+  if (RegForm.clienteId) {
+    const subs = clienteSuscripciones(RegForm.clienteId);
+    html += `<div class="sect"><h2>Planes a renovar</h2></div>`;
+    if (!subs.length) {
+      html += `<div class="card"><div class="empty" style="padding:18px">${I.tv}
+        <p>Este cliente no tiene planes registrados.</p>
+        <button class="btn sm" style="margin-top:12px" onclick="ClienteForm.open('${RegForm.clienteId}')">Asignar planes</button>
+      </div></div>`;
+    }
+    subs.forEach(s => {
+      const it = RegForm.items[s.id] || (RegForm.items[s.id] = { sel: false, dias: 30 });
+      const nuevoVence = it.dias > 0 ? addDays((s.vence && s.vence >= RegForm.fecha) ? s.vence : RegForm.fecha, it.dias) : null;
+      html += `
+      <div class="sub-card" style="${it.sel ? '' : 'opacity:.6'}">
+        <label style="display:flex;align-items:center;gap:9px;margin-top:0;font-size:.92rem;color:var(--text);font-weight:600">
+          <input type="checkbox" ${it.sel?'checked':''} onchange="RegForm.items['${s.id}'].sel=this.checked;App.nav('registro')">
+          ${esc(s.nombre)} <span style="color:var(--muted);font-weight:500">· ${fmtMoneda(s.precio, s.monedaId)}</span>
+        </label>
+        <div style="font-size:.75rem;color:var(--muted);margin-top:4px">
+          ${s.cuentaCorreo ? esc(s.cuentaCorreo) + ' · ' : ''}${s.vence ? 'vence ' + fmtDate(s.vence) + ' (' + daysText(daysLeft(s.vence)).toLowerCase() + ')' : 'sin activar'}
+        </div>
+        ${it.sel ? `
+        <label>Días a añadir</label>
+        <input type="number" min="1" inputmode="numeric" value="${it.dias}"
+          oninput="RegForm.items['${s.id}'].dias=Number(this.value)||0;V._regCalc()">
+        <div style="font-size:.78rem;color:var(--accent);margin-top:6px;font-weight:600">${nuevoVence ? 'Nuevo vencimiento: ' + fmtDate(nuevoVence) : ''}</div>` : ''}
+      </div>`;
+    });
 
-  RegForm.planes.forEach((pl, i) => {
-    const plat = getPlataforma(pl.plataformaId);
-    const platsOpts = plats.map(p => `<option value="${p.id}" ${pl.plataformaId===p.id?'selected':''}>${esc(p.nombre)} — ${fmtUSD(p.precioUsd)}</option>`).join('');
+    html += `<div class="sect"><h2>Pago recibido</h2></div>`;
+    RegForm.pagos.forEach((pg, i) => {
+      const met = getMetodo(pg.metodoId);
+      const metsOpts = mets.map(m => `<option value="${m.id}" ${pg.metodoId===m.id?'selected':''}>${esc(m.nombre)} (${esc(monedaCodigo(m.monedaId))})</option>`).join('');
+      html += `
+      <div class="sub-card">
+        ${RegForm.pagos.length > 1 ? `<button class="remove" onclick="RegForm.pagos.splice(${i},1);App.nav('registro')">${I.x}</button>` : ''}
+        <label>Método de pago</label>
+        <select onchange="RegForm.pagos[${i}].metodoId=this.value;App.nav('registro')">
+          <option value="">Seleccionar…</option>${metsOpts}
+        </select>
+        <label>Monto${met ? ' en ' + esc(monedaCodigo(met.monedaId)) : ''}</label>
+        <input type="number" step="any" min="0" inputmode="decimal" value="${pg.monto}"
+          oninput="RegForm.pagos[${i}].monto=this.value;V._regCalc()" placeholder="0.00">
+      </div>`;
+    });
+
     html += `
-    <div class="sub-card">
-      ${RegForm.planes.length > 1 ? `<button class="remove" onclick="RegForm.planes.splice(${i},1);App.nav('registro')">${I.x}</button>` : ''}
-      <label>Plataforma / plan</label>
-      <select onchange="RegForm.planes[${i}].plataformaId=this.value;App.nav('registro')">
-        <option value="">Seleccionar…</option>${platsOpts}
-      </select>
-      <label>Duración (días)</label>
-      <input type="number" min="1" inputmode="numeric" value="${pl.dias}"
-        oninput="RegForm.planes[${i}].dias=Number(this.value)||0;V._regCalc()">
-      <div style="font-size:.78rem;color:var(--muted);margin-top:7px" id="rf-vence-${i}"></div>
-    </div>`;
-  });
-
-  html += `
-  <button class="add-row" onclick="RegForm.planes.push({plataformaId:'',dias:30});App.nav('registro')">${I.plus} Agregar plataforma</button>
-
-  <div class="sect"><h2>Pagos recibidos</h2></div>`;
-
-  RegForm.pagos.forEach((pg, i) => {
-    const met = getMetodo(pg.metodoId);
-    const metsOpts = mets.map(m => `<option value="${m.id}" ${pg.metodoId===m.id?'selected':''}>${esc(m.nombre)}</option>`).join('');
-    html += `
-    <div class="sub-card">
-      ${RegForm.pagos.length > 1 ? `<button class="remove" onclick="RegForm.pagos.splice(${i},1);App.nav('registro')">${I.x}</button>` : ''}
-      <label>Método de pago</label>
-      <select onchange="RegForm.pagos[${i}].metodoId=this.value;App.nav('registro')">
-        <option value="">Seleccionar…</option>${metsOpts}
-      </select>
-      <label>Monto${met ? ' en ' + esc(met.nombre) : ''}</label>
-      <input type="number" step="any" min="0" inputmode="decimal" value="${pg.monto}"
-        oninput="RegForm.pagos[${i}].monto=this.value;V._regCalc()" placeholder="0.00">
-      ${met && met.requiereTasa ? `
-      <label>${esc(tasaLabel(met))}</label>
-      <input type="number" step="any" min="0" inputmode="decimal" value="${pg.tasa}"
-        oninput="RegForm.pagos[${i}].tasa=this.value;V._regCalc()" placeholder="Ej: 45.50">
-      <div style="font-size:.72rem;color:var(--muted);margin-top:4px">Cálculo: monto ${met.modoTasa === 'multiplicar' ? '×' : '÷'} tasa = USD</div>` : ''}
-      <div style="font-size:.78rem;color:var(--accent);margin-top:7px;font-weight:650" id="rf-usd-${i}"></div>
-    </div>`;
-  });
-
-  html += `
-  <button class="add-row" onclick="RegForm.pagos.push({metodoId:'',monto:'',tasa:''});App.nav('registro')">${I.plus} Agregar pago</button>
-
-  <div class="summary" id="rf-summary"></div>
-  <div class="spacer"></div>
-  <button class="btn full" style="margin-top:12px" onclick="V._regSave()">Guardar registro</button>`;
+    <button class="add-row" onclick="RegForm.pagos.push({metodoId:'',monto:''});App.nav('registro')">${I.plus} Agregar pago</button>
+    <div class="summary" id="rf-summary"></div>
+    <div class="spacer"></div>
+    <button class="btn full" style="margin-top:12px" onclick="V._regSave()">Guardar registro</button>`;
+  }
 
   App.render(html);
   V._regCalc();
@@ -456,70 +544,82 @@ V.registro = function(){
 
 /* Cálculo en vivo del formulario de registro */
 V._regCalc = function(){
-  let esperado = 0;
-  RegForm.planes.forEach((pl, i) => {
-    const plat = getPlataforma(pl.plataformaId);
-    if (plat) esperado += Number(plat.precioUsd) || 0;
-    const el = document.getElementById('rf-vence-' + i);
-    if (el) el.textContent = (plat && pl.dias > 0)
-      ? 'Vence el ' + fmtDate(addDays(RegForm.fecha, pl.dias))
-      : '';
+  if (!RegForm.clienteId) return;
+  const subs = clienteSuscripciones(RegForm.clienteId);
+  const esperadoItems = [];
+  subs.forEach(s => {
+    const it = RegForm.items[s.id];
+    if (it && it.sel) esperadoItems.push({ monedaId: s.monedaId, monto: s.precio });
   });
-  let pagado = 0;
-  RegForm.pagos.forEach((pg, i) => {
+  const esperado = sumarPorMoneda(esperadoItems);
+  const pagado = sumarPorMoneda(RegForm.pagos.map(pg => {
     const met = getMetodo(pg.metodoId);
-    const monto = Number(pg.monto) || 0;
-    const usd = met ? convToUsd(monto, pg.tasa, met) : 0;
-    pagado += usd;
-    const el = document.getElementById('rf-usd-' + i);
-    if (el) el.textContent = met && monto ? '= ' + fmtUSD(usd) + ' USD' : '';
-  });
-  const saldo = pagado - esperado;
+    return { monedaId: met ? met.monedaId : '', monto: pg.monto };
+  }).filter(x => x.monedaId));
+  const saldo = restarMapas(pagado, esperado);
+
   const sum = document.getElementById('rf-summary');
-  if (sum) sum.innerHTML = `
-    <div class="row"><span class="muted">Total esperado</span><span class="mono">${fmtUSD(esperado)}</span></div>
-    <div class="row"><span class="muted">Total pagado</span><span class="mono">${fmtUSD(pagado)}</span></div>
-    <div class="row total"><span>Saldo</span>
-      <span class="mono" style="color:${Math.abs(saldo) < 0.009 ? 'var(--green)' : (saldo < 0 ? 'var(--red)' : 'var(--amber)')}">
-        ${Math.abs(saldo) < 0.009 ? 'Pago exacto' : (saldo < 0 ? 'Debe ' + fmtUSD(Math.abs(saldo)) : 'A favor ' + fmtUSD(saldo))}
-      </span></div>`;
+  if (!sum) return;
+  const saldoLimpio = limpiarMapa(saldo);
+  let saldoTxt;
+  if (!Object.keys(saldoLimpio).length) {
+    saldoTxt = '<span style="color:var(--green)">Pago exacto</span>';
+  } else {
+    saldoTxt = Object.keys(saldoLimpio).sort((a,b)=>monedaCodigo(a).localeCompare(monedaCodigo(b))).map(k => {
+      const v = saldoLimpio[k];
+      return `<span style="color:${v < 0 ? 'var(--red)' : 'var(--amber)'}">${v < 0 ? 'Debe ' : 'A favor '}${fmtMoneda(Math.abs(v), k)}</span>`;
+    }).join(' · ');
+  }
+  sum.innerHTML = `
+    <div class="row"><span class="muted">Total esperado</span><span class="mono">${fmtMapa(esperado, {zeroText:'—'})}</span></div>
+    <div class="row"><span class="muted">Total pagado</span><span class="mono">${fmtMapa(pagado, {zeroText:'—'})}</span></div>
+    <div class="row total"><span>Saldo</span><span class="mono">${saldoTxt}</span></div>`;
 };
 
 V._regSave = function(){
   if (!RegForm.clienteId) return toast('Selecciona un cliente', true);
-  const planes = [];
-  for (const pl of RegForm.planes) {
-    const plat = getPlataforma(pl.plataformaId);
-    if (!plat) return toast('Selecciona la plataforma de cada plan', true);
-    if (!pl.dias || pl.dias < 1) return toast('La duración debe ser al menos 1 día', true);
-    planes.push({
-      plataformaId: plat.id, nombre: plat.nombre,
-      dias: pl.dias, vence: addDays(RegForm.fecha, pl.dias),
-      precio: Number(plat.precioUsd) || 0
+  const cli = getCliente(RegForm.clienteId);
+  const subs = clienteSuscripciones(RegForm.clienteId);
+
+  // items seleccionados
+  const items = [];
+  const updates = [];  // {suscripcionId, nuevoVence}
+  for (const s of subs) {
+    const it = RegForm.items[s.id];
+    if (!it || !it.sel) continue;
+    if (!it.dias || it.dias < 1) return toast('Los días a añadir deben ser al menos 1', true);
+    const base = (s.vence && s.vence >= RegForm.fecha) ? s.vence : RegForm.fecha;
+    const nuevoVence = addDays(base, it.dias);
+    items.push({
+      suscripcionId: s.id, plataformaId: s.plataformaId, nombre: s.nombre,
+      monedaId: s.monedaId, precio: s.precio, dias: it.dias, vence: nuevoVence
     });
+    updates.push({ id: s.id, vence: nuevoVence });
   }
+  if (!items.length) return toast('Selecciona al menos un plan a renovar', true);
+
   const pagos = [];
   for (const pg of RegForm.pagos) {
     const met = getMetodo(pg.metodoId);
     if (!met) return toast('Selecciona el método de cada pago', true);
     const monto = Number(pg.monto) || 0;
     if (monto <= 0) return toast('Ingresa el monto de cada pago', true);
-    let tasa = 1, usd = monto;
-    if (met.requiereTasa) {
-      tasa = Number(pg.tasa) || 0;
-      if (tasa <= 0) return toast('Ingresa la tasa para ' + met.nombre, true);
-      usd = convToUsd(monto, tasa, met);
-    }
-    pagos.push({ metodoId: met.id, nombre: met.nombre, monto, tasa, usd });
+    pagos.push({ metodoId: met.id, nombre: met.nombre, monedaId: met.monedaId, monto });
   }
-  const totalUsd = pagos.reduce((s,p) => s + p.usd, 0);
-  const esperadoUsd = planes.reduce((s,p) => s + p.precio, 0);
+
+  const esperado = sumarPorMoneda(items.map(i => ({ monedaId: i.monedaId, monto: i.precio })));
+  const pagado = sumarPorMoneda(pagos);
+  const saldo = restarMapas(pagado, esperado);
+
+  // aplicar nuevos vencimientos a las suscripciones del cliente
+  updates.forEach(u => {
+    const s = (cli.suscripciones || []).find(x => x.id === u.id);
+    if (s) s.vence = u.vence;
+  });
+
   DB.registros.push({
     id: uid(), clienteId: RegForm.clienteId, fecha: RegForm.fecha,
-    planes, pagos,
-    totalUsd: Math.round(totalUsd * 100) / 100,
-    esperadoUsd: Math.round(esperadoUsd * 100) / 100,
-    saldo: Math.round((totalUsd - esperadoUsd) * 100) / 100
+    items, pagos, esperado, pagado, saldo
   });
   dbSave();
   const cliId = RegForm.clienteId;
@@ -554,27 +654,24 @@ V.alertas = function(){
     </div>`;
   }
 
-  const itemCliente = (x, tipo) => {
-    const d = x.dias;
-    return `
+  const itemCliente = (x) => `
     <div class="list-item">
       <div class="avatar">${esc(initials(x.cliente.nombre))}</div>
       <div class="body">
         <div class="title">${esc(x.cliente.nombre)}</div>
-        <div class="meta">${esc(x.plan.nombre)} · ${daysText(d).toLowerCase()}</div>
+        <div class="meta">${esc(x.plan.nombre)} · ${daysText(x.dias).toLowerCase()}</div>
       </div>
       <button class="icon-btn" style="color:#1faa53" onclick="WaMsg.open('${x.cliente.id}')">${I.wa}</button>
     </div>`;
-  };
 
   html += `<div class="sect"><h2>Clientes vencidos</h2><span class="cnt">${a.cliVencidos.length}</span></div>`;
   html += a.cliVencidos.length
-    ? a.cliVencidos.map(x => itemCliente(x, 'venc')).join('')
+    ? a.cliVencidos.map(itemCliente).join('')
     : `<div class="card"><p style="color:var(--muted);font-size:.85rem;text-align:center;padding:6px">Ninguno</p></div>`;
 
   html += `<div class="sect"><h2>Clientes por vencer</h2><span class="cnt">${a.cliPorVencer.length}</span></div>`;
   html += a.cliPorVencer.length
-    ? a.cliPorVencer.map(x => itemCliente(x, 'prox')).join('')
+    ? a.cliPorVencer.map(itemCliente).join('')
     : `<div class="card"><p style="color:var(--muted);font-size:.85rem;text-align:center;padding:6px">Ninguno</p></div>`;
 
   html += `<div class="sect"><h2>Recargas por vencer</h2><span class="cnt">${a.recPorVencer.length}</span></div>`;

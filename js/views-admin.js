@@ -11,6 +11,7 @@ V.menu = function(){
   </div>
 
   <button class="menu-item" onclick="App.nav('plataformas')">${I.tv} Plataformas y planes <span class="chev">${I.chev}</span></button>
+  <button class="menu-item" onclick="App.nav('monedas')">${I.wallet} Monedas <span class="chev">${I.chev}</span></button>
   <button class="menu-item" onclick="App.nav('metodos')">${I.card} Métodos de pago <span class="chev">${I.chev}</span></button>
   <button class="menu-item" onclick="App.nav('cuentas')">${I.key} Cuentas propias <span class="chev">${I.chev}</span></button>
   <button class="menu-item" onclick="App.nav('recargas')">${I.refresh} Recargas (egresos) <span class="chev">${I.chev}</span></button>
@@ -39,6 +40,79 @@ V._saveNombre = function(){
 };
 
 /* =================================================================
+   MONEDAS
+================================================================= */
+V.monedas = function(){
+  let html = `
+  <div class="page-head">
+    <div><h1>Monedas</h1><div class="sub">Monedas en las que cobras</div></div>
+    <div class="head-actions"><button class="btn sm" onclick="MonedaForm.open()">${I.plus} Nueva</button></div>
+  </div>
+  <div class="note">Cada plan se cobra en una moneda, y cada método de pago pertenece a una moneda. Los montos se registran y se muestran en su moneda, sin convertir a otra.</div>`;
+  if (!DB.monedas.length) html += `<div class="empty">${I.wallet}<p>Crea las monedas que usas, por ejemplo USD, COP o Bs.</p></div>`;
+  DB.monedas.forEach(m => {
+    const nPlanes = DB.plataformas.filter(p => p.monedaId === m.id).length;
+    const nMetodos = DB.metodos.filter(x => x.monedaId === m.id).length;
+    html += `
+    <div class="list-item" onclick="MonedaForm.open('${m.id}')">
+      <div class="body">
+        <div class="title">${esc(m.codigo)} · <span style="color:var(--muted);font-weight:500">${esc(m.nombre)}</span></div>
+        <div class="meta">${nPlanes} plan${nPlanes!==1?'es':''} · ${nMetodos} método${nMetodos!==1?'s':''}</div>
+      </div>
+      ${m.activo ? '<span class="chip green">Activa</span>' : '<span class="chip gray">Inactiva</span>'}
+    </div>`;
+  });
+  App.render(html);
+};
+
+const MonedaForm = {
+  editId: null,
+  open(id){
+    MonedaForm.editId = id || null;
+    const m = id ? getMoneda(id) : { activo: true };
+    Modal.open(`
+      <div class="modal-head"><h2>${id ? 'Editar moneda' : 'Nueva moneda'}</h2>
+        <button class="icon-btn" onclick="Modal.close()">${I.x}</button></div>
+      <label>Código *</label>
+      <input id="mo-codigo" value="${esc(m.codigo||'')}" placeholder="Ej: USD, COP, Bs" maxlength="6">
+      <label>Nombre</label>
+      <input id="mo-nombre" value="${esc(m.nombre||'')}" placeholder="Ej: Pesos colombianos">
+      <label style="display:flex;align-items:center;gap:9px;margin-top:16px">
+        <input type="checkbox" id="mo-activo" ${m.activo ? 'checked' : ''}> Moneda activa
+      </label>
+      <div class="modal-actions">
+        ${id ? `<button class="btn danger" onclick="MonedaForm.remove()">${I.trash}</button>` : ''}
+        <button class="btn" onclick="MonedaForm.save()">Guardar</button>
+      </div>`);
+  },
+  save(){
+    const codigo = document.getElementById('mo-codigo').value.trim();
+    const nombre = document.getElementById('mo-nombre').value.trim();
+    const activo = document.getElementById('mo-activo').checked;
+    if (!codigo) return toast('El código es obligatorio', true);
+    if (MonedaForm.editId) {
+      const m = getMoneda(MonedaForm.editId);
+      m.codigo = codigo; m.nombre = nombre || codigo; m.activo = activo;
+    } else {
+      DB.monedas.push({ id: uid(), codigo, nombre: nombre || codigo, activo });
+    }
+    dbSave(); Modal.close(); toast('Moneda guardada'); App.refresh();
+  },
+  remove(){
+    const id = MonedaForm.editId;
+    const usada = DB.plataformas.some(p => p.monedaId === id) || DB.metodos.some(m => m.monedaId === id);
+    if (usada) {
+      if (!confirm('Esta moneda la usan planes o métodos. Se recomienda desactivarla en vez de borrarla. ¿Desactivar ahora?')) return;
+      getMoneda(id).activo = false;
+      dbSave(); Modal.close(); toast('Moneda desactivada'); return App.refresh();
+    }
+    if (!confirm('¿Eliminar esta moneda?')) return;
+    DB.monedas = DB.monedas.filter(m => m.id !== id);
+    dbSave(); Modal.close(); toast('Moneda eliminada'); App.refresh();
+  }
+};
+
+/* =================================================================
    PLATAFORMAS / PLANES
 ================================================================= */
 V.plataformas = function(){
@@ -48,13 +122,20 @@ V.plataformas = function(){
     <div><h1>Plataformas</h1><div class="sub">Catálogo de planes que vendes</div></div>
     <div class="head-actions"><button class="btn sm" onclick="PlatForm.open()">${I.plus} Nuevo</button></div>
   </div>`;
+  if (!DB.monedas.filter(m => m.activo).length) {
+    html += `<div class="card"><div class="empty" style="padding:20px">${I.wallet}
+      <p>Primero crea al menos una moneda (USD, COP…) para poder ponerle precio a tus planes.</p>
+      <button class="btn sm" style="margin-top:12px" onclick="App.nav('monedas')">Ir a Monedas</button>
+    </div></div>`;
+    return App.render(html);
+  }
   if (!lista.length) html += `<div class="empty">${I.tv}<p>Crea tu primer plan, por ejemplo "Netflix 1 Pantalla".</p></div>`;
   lista.forEach(p => {
     html += `
     <div class="list-item" onclick="PlatForm.open('${p.id}')">
       <div class="body">
         <div class="title">${esc(p.nombre)}</div>
-        <div class="meta mono">${fmtUSD(p.precioUsd)} USD</div>
+        <div class="meta mono">${fmtMoneda(p.precio, p.monedaId)}</div>
       </div>
       ${p.activo ? '<span class="chip green">Activo</span>' : '<span class="chip gray">Inactivo</span>'}
     </div>`;
@@ -67,13 +148,17 @@ const PlatForm = {
   open(id){
     PlatForm.editId = id || null;
     const p = id ? getPlataforma(id) : { activo: true };
+    const monedas = DB.monedas.filter(m => m.activo || m.id === p.monedaId);
+    const monedasOpts = monedas.map(m => `<option value="${m.id}" ${p.monedaId===m.id?'selected':''}>${esc(m.codigo)} — ${esc(m.nombre)}</option>`).join('');
     Modal.open(`
       <div class="modal-head"><h2>${id ? 'Editar plan' : 'Nuevo plan'}</h2>
         <button class="icon-btn" onclick="Modal.close()">${I.x}</button></div>
       <label>Nombre *</label>
       <input id="pf-nombre" value="${esc(p.nombre||'')}" placeholder='Ej: "Netflix 2 Pantallas"'>
-      <label>Precio de venta (USD) *</label>
-      <input id="pf-precio" type="number" step="any" min="0" inputmode="decimal" value="${p.precioUsd != null ? p.precioUsd : ''}" placeholder="0.00">
+      <label>Moneda de cobro *</label>
+      <select id="pf-moneda">${monedasOpts}</select>
+      <label>Precio de venta *</label>
+      <input id="pf-precio" type="number" step="any" min="0" inputmode="decimal" value="${p.precio != null ? p.precio : ''}" placeholder="0.00">
       <label style="display:flex;align-items:center;gap:9px;margin-top:16px">
         <input type="checkbox" id="pf-activo" ${p.activo ? 'checked' : ''}> Plan activo (visible al registrar pagos)
       </label>
@@ -84,23 +169,26 @@ const PlatForm = {
   },
   save(){
     const nombre = document.getElementById('pf-nombre').value.trim();
+    const monedaId = document.getElementById('pf-moneda').value;
     const precio = Number(document.getElementById('pf-precio').value);
     const activo = document.getElementById('pf-activo').checked;
     if (!nombre) return toast('El nombre es obligatorio', true);
-    if (!(precio >= 0)) return toast('Ingresa el precio en USD', true);
+    if (!monedaId) return toast('Selecciona la moneda de cobro', true);
+    if (!(precio >= 0)) return toast('Ingresa el precio', true);
     if (PlatForm.editId) {
       const p = getPlataforma(PlatForm.editId);
-      p.nombre = nombre; p.precioUsd = precio; p.activo = activo;
+      p.nombre = nombre; p.monedaId = monedaId; p.precio = precio; p.activo = activo;
     } else {
-      DB.plataformas.push({ id: uid(), nombre, precioUsd: precio, activo });
+      DB.plataformas.push({ id: uid(), nombre, monedaId, precio, activo });
     }
     dbSave(); Modal.close(); toast('Plan guardado'); App.refresh();
   },
   remove(){
     const id = PlatForm.editId;
-    const usado = DB.registros.some(r => (r.planes||[]).some(p => p.plataformaId === id));
+    const usado = DB.registros.some(r => (r.items||[]).some(p => p.plataformaId === id))
+               || DB.clientes.some(c => (c.suscripciones||[]).some(s => s.plataformaId === id));
     if (usado) {
-      if (!confirm('Este plan ya fue usado en pagos. Se recomienda desactivarlo en vez de borrarlo. ¿Desactivar ahora?')) return;
+      if (!confirm('Este plan ya está en uso (pagos o clientes). Se recomienda desactivarlo en vez de borrarlo. ¿Desactivar ahora?')) return;
       getPlataforma(id).activo = false;
       dbSave(); Modal.close(); toast('Plan desactivado'); return App.refresh();
     }
@@ -116,16 +204,16 @@ const PlatForm = {
 V.metodos = function(){
   let html = `
   <div class="page-head">
-    <div><h1>Métodos de pago</h1><div class="sub">Monedas y formas de cobro</div></div>
+    <div><h1>Métodos de pago</h1><div class="sub">Formas de cobro y su moneda</div></div>
     <div class="head-actions"><button class="btn sm" onclick="MetForm.open()">${I.plus} Nuevo</button></div>
   </div>
-  <div class="note">Los métodos con tasa (Bs, COP…) piden la tasa del día al registrar; los demás cuentan 1 a 1 con el dólar.</div>`;
+  <div class="note">Cada método pertenece a una moneda (ej: Bancolombia y Nequi son COP). En la cartera se agrupan por moneda.</div>`;
   DB.metodos.forEach(m => {
     html += `
     <div class="list-item" onclick="MetForm.open('${m.id}')">
       <div class="body">
         <div class="title">${esc(m.nombre)}</div>
-        <div class="meta">${m.requiereTasa ? 'Con tasa: monto ' + (m.modoTasa === 'multiplicar' ? '× tasa' : '÷ tasa') + ' = USD' : 'Equivale 1:1 con USD'}</div>
+        <div class="meta">Moneda: ${esc(monedaCodigo(m.monedaId))}</div>
       </div>
       ${m.activo ? '<span class="chip green">Activo</span>' : '<span class="chip gray">Inactivo</span>'}
     </div>`;
@@ -137,24 +225,19 @@ const MetForm = {
   editId: null,
   open(id){
     MetForm.editId = id || null;
-    const m = id ? getMetodo(id) : { activo: true, requiereTasa: false, modoTasa: 'dividir' };
+    const m = id ? getMetodo(id) : { activo: true };
+    const monedas = DB.monedas.filter(x => x.activo || x.id === m.monedaId);
+    const monedasOpts = monedas.map(x => `<option value="${x.id}" ${m.monedaId===x.id?'selected':''}>${esc(x.codigo)} — ${esc(x.nombre)}</option>`).join('');
     Modal.open(`
       <div class="modal-head"><h2>${id ? 'Editar método' : 'Nuevo método'}</h2>
         <button class="icon-btn" onclick="Modal.close()">${I.x}</button></div>
       <label>Nombre *</label>
-      <input id="mf-nombre" value="${esc(m.nombre||'')}" placeholder='Ej: "Pago Móvil"'>
+      <input id="mf-nombre" value="${esc(m.nombre||'')}" placeholder='Ej: "Bancolombia"'>
+      <label>Moneda *</label>
+      <select id="mf-moneda">
+        <option value="">Seleccionar…</option>${monedasOpts}
+      </select>
       <label style="display:flex;align-items:center;gap:9px;margin-top:16px">
-        <input type="checkbox" id="mf-tasa" ${m.requiereTasa ? 'checked' : ''}
-          onchange="document.getElementById('mf-modo-wrap').style.display=this.checked?'':'none'"> Requiere tasa de cambio (moneda local)
-      </label>
-      <div id="mf-modo-wrap" style="${m.requiereTasa ? '' : 'display:none'}">
-        <label>Cómo se aplica la tasa</label>
-        <select id="mf-modo">
-          <option value="dividir" ${m.modoTasa !== 'multiplicar' ? 'selected' : ''}>Dividir: monto ÷ tasa = USD (ej: 4.500 Bs ÷ 45 = $100)</option>
-          <option value="multiplicar" ${m.modoTasa === 'multiplicar' ? 'selected' : ''}>Multiplicar: monto × tasa = USD (ej: 4.500 COP × 0.00025 = $1.13)</option>
-        </select>
-      </div>
-      <label style="display:flex;align-items:center;gap:9px;margin-top:12px">
         <input type="checkbox" id="mf-activo" ${m.activo ? 'checked' : ''}> Método activo
       </label>
       <div class="modal-actions">
@@ -164,15 +247,15 @@ const MetForm = {
   },
   save(){
     const nombre = document.getElementById('mf-nombre').value.trim();
-    if (!nombre) return toast('El nombre es obligatorio', true);
-    const requiereTasa = document.getElementById('mf-tasa').checked;
-    const modoTasa = document.getElementById('mf-modo').value;
+    const monedaId = document.getElementById('mf-moneda').value;
     const activo = document.getElementById('mf-activo').checked;
+    if (!nombre) return toast('El nombre es obligatorio', true);
+    if (!monedaId) return toast('Selecciona la moneda del método', true);
     if (MetForm.editId) {
       const m = getMetodo(MetForm.editId);
-      m.nombre = nombre; m.requiereTasa = requiereTasa; m.modoTasa = modoTasa; m.activo = activo;
+      m.nombre = nombre; m.monedaId = monedaId; m.activo = activo;
     } else {
-      DB.metodos.push({ id: uid(), nombre, requiereTasa, modoTasa, activo });
+      DB.metodos.push({ id: uid(), nombre, monedaId, activo });
     }
     dbSave(); Modal.close(); toast('Método guardado'); App.refresh();
   },
@@ -237,7 +320,7 @@ const CtaForm = {
     const plats = DB.plataformas.filter(p => p.activo || (c.plataformaIds||[]).includes(p.id));
     const checks = plats.map(p => `
       <label style="display:flex;align-items:center;gap:9px;margin-top:9px;font-size:.88rem;color:var(--text);font-weight:500">
-        <input type="checkbox" class="ctf-plat" value="${p.id}" ${(c.plataformaIds||[]).includes(p.id) ? 'checked' : ''}> ${esc(p.nombre)}
+        <input type="checkbox" class="ctf-plat" value="${p.id}" ${(c.plataformaIds||[]).includes(p.id) ? 'checked' : ''}> ${esc(p.nombre)} <span style="color:var(--muted)">· ${fmtMoneda(p.precio, p.monedaId)}</span>
       </label>`).join('');
     Modal.open(`
       <div class="modal-head"><h2>${id ? 'Editar cuenta' : 'Nueva cuenta'}</h2>
@@ -255,7 +338,7 @@ const CtaForm = {
         <option value="vencida" ${c.estado==='vencida'?'selected':''}>Vencida</option>
         <option value="suspendida" ${c.estado==='suspendida'?'selected':''}>Suspendida</option>
       </select>
-      <label>Plataformas que ofrece esta cuenta</label>
+      <label>Planes que ofrece esta cuenta</label>
       ${checks || '<p style="font-size:.83rem;color:var(--muted)">Primero crea planes en el catálogo de plataformas.</p>'}
       <div class="modal-actions">
         ${id ? `<button class="btn danger" onclick="CtaForm.remove()">${I.trash}</button>` : ''}
@@ -278,9 +361,12 @@ const CtaForm = {
   },
   remove(){
     const id = CtaForm.editId;
-    if (!confirm('¿Eliminar esta cuenta? También se borrará su historial de recargas.')) return;
+    const usada = DB.clientes.some(c => (c.suscripciones||[]).some(s => s.cuentaId === id));
+    if (usada && !confirm('Hay clientes que usan esta cuenta. Si la eliminas, sus planes quedarán sin cuenta asociada. ¿Continuar?')) return;
+    if (!usada && !confirm('¿Eliminar esta cuenta? También se borrará su historial de recargas.')) return;
     DB.recargas = DB.recargas.filter(r => r.cuentaId !== id);
     DB.cuentas = DB.cuentas.filter(c => c.id !== id);
+    DB.clientes.forEach(c => (c.suscripciones||[]).forEach(s => { if (s.cuentaId === id) s.cuentaId = null; }));
     dbSave(); Modal.close(); toast('Cuenta eliminada'); App.refresh();
   }
 };
@@ -305,11 +391,11 @@ V.recargas = function(){
         <div style="flex:1;min-width:0">
           <div style="font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(cta ? cta.correo : '(cuenta eliminada)')}</div>
           <div style="font-size:.78rem;color:var(--muted);margin-top:2px">
-            ${fmtDate(r.fecha)} · ${r.dias} días · ${(r.pagos||[]).map(p => esc(p.nombre) + ' ' + fmtNum(p.monto)).join(' · ')}
+            ${fmtDate(r.fecha)} · ${r.dias} días · ${(r.pagos||[]).map(p => esc(p.nombre) + ' ' + fmtMoneda(p.monto, p.monedaId)).join(' · ')}
           </div>
         </div>
         <div style="text-align:right">
-          <div class="mono" style="font-weight:750;color:var(--red)">-${fmtUSD(r.totalUsd)}</div>
+          <div class="mono" style="font-weight:750;color:var(--red)">-${fmtMapa(r.total, {sep:'<br>-'})}</div>
           <span class="days-pill ${daysPillClass(d)}" style="margin-top:5px;display:inline-block">${daysText(d)}</span>
         </div>
       </div>
@@ -326,7 +412,7 @@ const RecForm = {
     RecForm.cuentaId = cuentaId || '';
     RecForm.fecha = todayISO();
     RecForm.dias = 30;
-    RecForm.pagos = [{ metodoId: '', monto: '', tasa: '' }];
+    RecForm.pagos = [{ metodoId: '', monto: '' }];
     if (!DB.cuentas.length) { toast('Primero crea una cuenta propia', true); return App.nav('cuentas'); }
     RecForm.render();
   },
@@ -337,7 +423,7 @@ const RecForm = {
     let pagosHtml = '';
     RecForm.pagos.forEach((pg, i) => {
       const met = getMetodo(pg.metodoId);
-      const metsOpts = mets.map(m => `<option value="${m.id}" ${pg.metodoId===m.id?'selected':''}>${esc(m.nombre)}</option>`).join('');
+      const metsOpts = mets.map(m => `<option value="${m.id}" ${pg.metodoId===m.id?'selected':''}>${esc(m.nombre)} (${esc(monedaCodigo(m.monedaId))})</option>`).join('');
       pagosHtml += `
       <div class="sub-card">
         ${RecForm.pagos.length > 1 ? `<button class="remove" onclick="RecForm.pagos.splice(${i},1);RecForm.render()">${I.x}</button>` : ''}
@@ -345,15 +431,9 @@ const RecForm = {
         <select onchange="RecForm.pagos[${i}].metodoId=this.value;RecForm.render()">
           <option value="">Seleccionar…</option>${metsOpts}
         </select>
-        <label>Monto${met ? ' en ' + esc(met.nombre) : ''}</label>
+        <label>Monto${met ? ' en ' + esc(monedaCodigo(met.monedaId)) : ''}</label>
         <input type="number" step="any" min="0" inputmode="decimal" value="${pg.monto}"
           oninput="RecForm.pagos[${i}].monto=this.value;RecForm.calc()" placeholder="0.00">
-        ${met && met.requiereTasa ? `
-        <label>${esc(tasaLabel(met))}</label>
-        <input type="number" step="any" min="0" inputmode="decimal" value="${pg.tasa}"
-          oninput="RecForm.pagos[${i}].tasa=this.value;RecForm.calc()" placeholder="Ej: 45.50">
-        <div style="font-size:.72rem;color:var(--muted);margin-top:4px">Cálculo: monto ${met.modoTasa === 'multiplicar' ? '×' : '÷'} tasa = USD</div>` : ''}
-        <div style="font-size:.78rem;color:var(--accent);margin-top:7px;font-weight:650" id="rec-usd-${i}"></div>
       </div>`;
     });
 
@@ -372,7 +452,7 @@ const RecForm = {
       <div style="font-size:.78rem;color:var(--muted);margin-top:7px" id="rec-vence"></div>
       <div class="sect"><h2>Pagos</h2></div>
       ${pagosHtml}
-      <button class="add-row" onclick="RecForm.pagos.push({metodoId:'',monto:'',tasa:''});RecForm.render()">${I.plus} Agregar pago</button>
+      <button class="add-row" onclick="RecForm.pagos.push({metodoId:'',monto:''});RecForm.render()">${I.plus} Agregar pago</button>
       <div class="summary" id="rec-summary"></div>
       <div class="modal-actions">
         <button class="btn" onclick="RecForm.save()">Guardar recarga</button>
@@ -381,19 +461,14 @@ const RecForm = {
   },
 
   calc(){
-    let total = 0;
-    RecForm.pagos.forEach((pg, i) => {
+    const total = sumarPorMoneda(RecForm.pagos.map(pg => {
       const met = getMetodo(pg.metodoId);
-      const monto = Number(pg.monto) || 0;
-      const usd = met ? convToUsd(monto, pg.tasa, met) : 0;
-      total += usd;
-      const el = document.getElementById('rec-usd-' + i);
-      if (el) el.textContent = met && monto ? '= ' + fmtUSD(usd) + ' USD' : '';
-    });
+      return { monedaId: met ? met.monedaId : '', monto: pg.monto };
+    }).filter(x => x.monedaId));
     const v = document.getElementById('rec-vence');
     if (v) v.textContent = RecForm.dias > 0 ? 'Vence el ' + fmtDate(addDays(RecForm.fecha, RecForm.dias)) : '';
     const s = document.getElementById('rec-summary');
-    if (s) s.innerHTML = `<div class="row total"><span>Total egreso</span><span class="mono" style="color:var(--red)">${fmtUSD(total)}</span></div>`;
+    if (s) s.innerHTML = `<div class="row total"><span>Total egreso</span><span class="mono" style="color:var(--red)">${fmtMapa(total, {zeroText: fmtMoneda(0,null)})}</span></div>`;
   },
 
   save(){
@@ -405,18 +480,11 @@ const RecForm = {
       if (!met) return toast('Selecciona el método de cada pago', true);
       const monto = Number(pg.monto) || 0;
       if (monto <= 0) return toast('Ingresa el monto de cada pago', true);
-      let tasa = 1, usd = monto;
-      if (met.requiereTasa) {
-        tasa = Number(pg.tasa) || 0;
-        if (tasa <= 0) return toast('Ingresa la tasa para ' + met.nombre, true);
-        usd = convToUsd(monto, tasa, met);
-      }
-      pagos.push({ metodoId: met.id, nombre: met.nombre, monto, tasa, usd });
+      pagos.push({ metodoId: met.id, nombre: met.nombre, monedaId: met.monedaId, monto });
     }
-    const totalUsd = pagos.reduce((s,p) => s + p.usd, 0);
     DB.recargas.push({
       id: uid(), cuentaId: RecForm.cuentaId, fecha: RecForm.fecha,
-      pagos, totalUsd: Math.round(totalUsd * 100) / 100,
+      pagos, total: sumarPorMoneda(pagos),
       dias: RecForm.dias, vence: addDays(RecForm.fecha, RecForm.dias)
     });
     const cta = getCuenta(RecForm.cuentaId);
@@ -467,11 +535,12 @@ V.respaldo = function(){
   <input type="file" id="imp-file" accept=".json,application/json" class="hidden" onchange="V._importar(this)">
   <div class="sect"><h2>Resumen</h2></div>
   <div class="card">
-    <div class="card-row" style="padding:4px 0"><span class="muted" style="color:var(--muted)">Clientes</span><b>${DB.clientes.length}</b></div>
+    <div class="card-row" style="padding:4px 0"><span style="color:var(--muted)">Clientes</span><b>${DB.clientes.length}</b></div>
     <div class="card-row" style="padding:4px 0"><span style="color:var(--muted)">Registros de pago</span><b>${DB.registros.length}</b></div>
     <div class="card-row" style="padding:4px 0"><span style="color:var(--muted)">Recargas</span><b>${DB.recargas.length}</b></div>
     <div class="card-row" style="padding:4px 0"><span style="color:var(--muted)">Cuentas propias</span><b>${DB.cuentas.length}</b></div>
     <div class="card-row" style="padding:4px 0"><span style="color:var(--muted)">Planes en catálogo</span><b>${DB.plataformas.length}</b></div>
+    <div class="card-row" style="padding:4px 0"><span style="color:var(--muted)">Monedas</span><b>${DB.monedas.length}</b></div>
   </div>`;
   App.render(html);
 };
@@ -491,6 +560,7 @@ V._importar = function(input){
       if (!data || !Array.isArray(data.clientes) || !Array.isArray(data.metodos)) throw new Error('formato');
       if (!confirm('Esto reemplazará TODOS los datos actuales por los del respaldo. ¿Continuar?')) return;
       DB = data;
+      dbMigrate();
       dbSave();
       toast('Respaldo importado');
       App.boot();
