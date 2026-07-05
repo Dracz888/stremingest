@@ -26,7 +26,7 @@ V.dashboard = function(){
   <div class="page-head">
     <div>
       <h1>Gestión</h1>
-      <div class="sub">Hola, ${esc(Auth.current.usuario)} · ${fmtDate(todayISO())}</div>
+      <div class="sub">Hola, ${esc(DB.config.usuario)} · ${fmtDate(todayISO())}</div>
     </div>
   </div>
 
