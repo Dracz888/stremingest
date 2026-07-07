@@ -19,6 +19,7 @@ function dbDefault(){
       hoy: 'Hola {nombre}, tu plan de {plan} vence HOY. Renueva ahora para mantener tu servicio activo.',
       renovado: 'Hola {nombre}, tu plan de {plan} fue renovado con éxito. Vence el {fecha}. Gracias por tu compra.'
     },
+    plantillas: [],       // plantillas personalizadas de WhatsApp: {id, nombre, texto}
     config: {
       usuario: ''            // nombre de quien usa la app (solo para dar la bienvenida)
     }
@@ -52,6 +53,12 @@ function dbSeed(data){
 function dbMigrate(){
   if (!DB.config) DB.config = { usuario: '' };
   if (DB.config.usuario == null) DB.config.usuario = '';
+
+  // Plantillas de WhatsApp: fijas + personalizadas
+  const tplDefaults = dbDefault().templates;
+  if (!DB.templates) DB.templates = {};
+  Object.keys(tplDefaults).forEach(k => { if (DB.templates[k] == null) DB.templates[k] = tplDefaults[k]; });
+  if (!Array.isArray(DB.plantillas)) DB.plantillas = [];
 
   // ---- 1. Catálogo de monedas ----
   if (!Array.isArray(DB.monedas)) DB.monedas = [];
@@ -298,9 +305,30 @@ function clienteEstado(clienteId){
 }
 
 /* ---- Totales financieros (por moneda) ---- */
-function totalIngresos(){ return acumularMapas(DB.registros.map(r => r.pagado || {})); }
-function totalEgresos(){ return acumularMapas(DB.recargas.map(r => r.total || {})); }
-function balanceGeneral(){ return restarMapas(totalIngresos(), totalEgresos()); }
+
+/* ¿La fecha ISO cae en el año/mes indicados? ('' = sin filtro) */
+function enPeriodo(fecha, anio, mes){
+  const f = String(fecha || '').slice(0, 10);
+  if (anio && f.slice(0, 4) !== String(anio)) return false;
+  if (mes && f.slice(5, 7) !== String(mes)) return false;
+  return true;
+}
+
+/* Años con movimientos (registros o recargas), del más reciente al más antiguo */
+function aniosConMovimientos(){
+  const set = new Set();
+  DB.registros.forEach(r => { const y = String(r.fecha||'').slice(0,4); if (y) set.add(y); });
+  DB.recargas.forEach(r => { const y = String(r.fecha||'').slice(0,4); if (y) set.add(y); });
+  return Array.from(set).sort((a,b) => b.localeCompare(a));
+}
+
+function totalIngresos(anio, mes){
+  return acumularMapas(DB.registros.filter(r => enPeriodo(r.fecha, anio, mes)).map(r => r.pagado || {}));
+}
+function totalEgresos(anio, mes){
+  return acumularMapas(DB.recargas.filter(r => enPeriodo(r.fecha, anio, mes)).map(r => r.total || {}));
+}
+function balanceGeneral(anio, mes){ return restarMapas(totalIngresos(anio, mes), totalEgresos(anio, mes)); }
 
 /* Cartera: acumulado por método en su moneda (ingresos - egresos) */
 function cartera(){
@@ -337,16 +365,18 @@ function rankingPlataformas(periodo){
 }
 
 /* ============ Alertas ============ */
-/* Devuelve {cliVencidos, cliPorVencer, recPorVencer} */
+/* Devuelve {cliVencidos, cliPorVencer, cliProximos, recPorVencer} */
 function calcAlertas(){
   const cliVencidos = [];
   const cliPorVencer = [];
+  const cliProximos = [];   // vencen en 2 a 7 días (informativo, no cuenta en el badge)
   DB.clientes.forEach(c => {
     clienteSuscripciones(c.id).forEach(s => {
       if (!s.vence) return;
       const d = daysLeft(s.vence);
       if (d < 0) cliVencidos.push({ cliente: c, plan: s, dias: d });
       else if (d <= 1) cliPorVencer.push({ cliente: c, plan: s, dias: d });
+      else if (d <= 7) cliProximos.push({ cliente: c, plan: s, dias: d });
     });
   });
   const recPorVencer = [];
@@ -359,8 +389,9 @@ function calcAlertas(){
   });
   cliVencidos.sort((a,b) => a.dias - b.dias);
   cliPorVencer.sort((a,b) => a.dias - b.dias);
+  cliProximos.sort((a,b) => a.dias - b.dias);
   recPorVencer.sort((a,b) => a.dias - b.dias);
-  return { cliVencidos, cliPorVencer, recPorVencer };
+  return { cliVencidos, cliPorVencer, cliProximos, recPorVencer };
 }
 
 function alertCount(){

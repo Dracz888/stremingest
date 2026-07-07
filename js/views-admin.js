@@ -14,6 +14,7 @@ V.menu = function(){
   <button class="menu-item" onclick="App.nav('monedas')">${I.wallet} Monedas <span class="chev">${I.chev}</span></button>
   <button class="menu-item" onclick="App.nav('metodos')">${I.card} Métodos de pago <span class="chev">${I.chev}</span></button>
   <button class="menu-item" onclick="App.nav('cuentas')">${I.key} Cuentas propias <span class="chev">${I.chev}</span></button>
+  <button class="menu-item" onclick="App.nav('movimientos')">${I.chart} Ingresos y egresos <span class="chev">${I.chev}</span></button>
   <button class="menu-item" onclick="App.nav('recargas')">${I.refresh} Recargas (egresos) <span class="chev">${I.chev}</span></button>
   <button class="menu-item" onclick="App.nav('plantillas')">${I.msg} Plantillas de WhatsApp <span class="chev">${I.chev}</span></button>
   <button class="menu-item" onclick="App.nav('sync')">${I.cloud} Compartir / Sincronizar ${V._syncBadge()}<span class="chev">${I.chev}</span></button>
@@ -373,6 +374,103 @@ const CtaForm = {
 };
 
 /* =================================================================
+   MOVIMIENTOS: registro completo de ingresos (pagos) y egresos (recargas)
+================================================================= */
+V._movTipo = 'todos';   // 'todos' | 'ingresos' | 'egresos'
+V._movAnio = '';
+V._movMes = '';
+
+V.movimientos = function(){
+  const tipo = V._movTipo, anio = V._movAnio, mes = V._movMes;
+
+  const ingresos = DB.registros.filter(r => enPeriodo(r.fecha, anio, mes));
+  const egresos = DB.recargas.filter(r => enPeriodo(r.fecha, anio, mes));
+
+  const movs = [];
+  if (tipo !== 'egresos') ingresos.forEach(r => movs.push({ tipo: 'ing', fecha: r.fecha, r }));
+  if (tipo !== 'ingresos') egresos.forEach(r => movs.push({ tipo: 'egr', fecha: r.fecha, r }));
+  movs.sort((a,b) => String(b.fecha).localeCompare(String(a.fecha)));
+
+  const totIng = acumularMapas(ingresos.map(r => r.pagado || {}));
+  const totEgr = acumularMapas(egresos.map(r => r.total || {}));
+  const balance = limpiarMapa(restarMapas(totIng, totEgr));
+
+  let html = `
+  <div class="page-head">
+    <div><h1>Ingresos y egresos</h1><div class="sub">Registro completo de pagos y recargas</div></div>
+  </div>
+
+  <div class="seg">
+    <button class="${tipo==='todos'?'active':''}" onclick="V._movTipo='todos';App.nav('movimientos')">Todos</button>
+    <button class="${tipo==='ingresos'?'active':''}" onclick="V._movTipo='ingresos';App.nav('movimientos')">Ingresos</button>
+    <button class="${tipo==='egresos'?'active':''}" onclick="V._movTipo='egresos';App.nav('movimientos')">Egresos</button>
+  </div>
+  <div style="display:flex;gap:8px;margin-bottom:12px">
+    <select style="margin:0" onchange="V._movMes=this.value;App.nav('movimientos')">
+      <option value="">Todos los meses</option>
+      ${V._MESES.map((m,i) => { const v = String(i+1).padStart(2,'0'); return `<option value="${v}" ${mes===v?'selected':''}>${m}</option>`; }).join('')}
+    </select>
+    <select style="margin:0" onchange="V._movAnio=this.value;App.nav('movimientos')">
+      <option value="">Todos los años</option>
+      ${aniosConMovimientos().map(y => `<option value="${y}" ${anio===y?'selected':''}>${y}</option>`).join('')}
+    </select>
+  </div>
+
+  <div class="card" style="margin-bottom:12px">
+    <div class="card-row" style="padding:4px 0"><span style="color:var(--muted)">Ingresos</span><span class="mono" style="color:var(--green);font-weight:700">${fmtMapa(totIng, {zeroText:'—'})}</span></div>
+    <div class="card-row" style="padding:4px 0"><span style="color:var(--muted)">Egresos</span><span class="mono" style="color:var(--red);font-weight:700">${fmtMapa(totEgr, {zeroText:'—'})}</span></div>
+    <div class="card-row" style="padding:6px 0;border-top:1px solid var(--border)"><span style="font-weight:750">Balance</span><span class="mono" style="font-weight:750">${fmtMapa(balance, {zeroText:'—'})}</span></div>
+  </div>`;
+
+  if (!movs.length) {
+    html += `<div class="empty">${I.chart}<p>Sin movimientos${anio || mes ? ' en el período seleccionado' : ''}.</p></div>`;
+  }
+  movs.forEach(m => {
+    const r = m.r;
+    if (m.tipo === 'ing') {
+      const cli = getCliente(r.clienteId);
+      html += `
+      <div class="card" style="padding:12px 14px;margin-bottom:9px">
+        <div class="card-row">
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span class="chip green" style="margin-right:6px">Ingreso</span>${esc(cli ? cli.nombre : '(cliente eliminado)')}</div>
+            <div style="font-size:.78rem;color:var(--muted);margin-top:3px">
+              ${fmtDate(r.fecha)} · ${(r.items||[]).map(p => esc(p.nombre) + ' (+' + p.dias + 'd)').join(' · ') || 'Sin planes'}
+            </div>
+            <div style="font-size:.78rem;color:var(--muted)">
+              ${(r.pagos||[]).map(p => esc(p.nombre) + ' ' + fmtMoneda(p.monto, p.monedaId) + (p.convMonto != null ? ' (= ' + fmtMoneda(p.convMonto, p.convMonedaId) + ')' : '')).join(' · ')}
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+            <span class="mono" style="font-weight:750;color:var(--green)">+${fmtMapa(r.pagado, {sep:'<br>+', zeroText:'—'})}</span>
+            <button class="icon-btn" style="width:32px;height:32px;color:var(--red)" title="Eliminar" onclick="V._delRegistro('${r.id}')">${I.trash}</button>
+          </div>
+        </div>
+      </div>`;
+    } else {
+      const cta = getCuenta(r.cuentaId);
+      html += `
+      <div class="card" style="padding:12px 14px;margin-bottom:9px">
+        <div class="card-row">
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span class="chip red" style="margin-right:6px">Egreso</span>${esc(cta ? cta.correo : '(cuenta eliminada)')}</div>
+            <div style="font-size:.78rem;color:var(--muted);margin-top:3px">
+              ${fmtDate(r.fecha)} · Recarga ${r.dias} días · ${(r.pagos||[]).map(p => esc(p.nombre) + ' ' + fmtMoneda(p.monto, p.monedaId)).join(' · ')}
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+            <span class="mono" style="font-weight:750;color:var(--red)">-${fmtMapa(r.total, {sep:'<br>-', zeroText:'—'})}</span>
+            <button class="icon-btn" style="width:32px;height:32px;color:var(--red)" title="Eliminar" onclick="V._delRecarga('${r.id}')">${I.trash}</button>
+          </div>
+        </div>
+      </div>`;
+    }
+  });
+
+  App.render(html);
+};
+
+/* =================================================================
    RECARGAS (egresos)
 ================================================================= */
 V.recargas = function(){
@@ -398,6 +496,7 @@ V.recargas = function(){
         <div style="text-align:right">
           <div class="mono" style="font-weight:750;color:var(--red)">-${fmtMapa(r.total, {sep:'<br>-'})}</div>
           <span class="days-pill ${daysPillClass(d)}" style="margin-top:5px;display:inline-block">${daysText(d)}</span>
+          <div><button class="icon-btn" style="width:32px;height:32px;color:var(--red);margin-top:5px" title="Eliminar recarga" onclick="V._delRecarga('${r.id}')">${I.trash}</button></div>
         </div>
       </div>
     </div>`;
@@ -500,18 +599,35 @@ const RecForm = {
 ================================================================= */
 V.plantillas = function(){
   const t = DB.templates;
-  const html = `
+  let html = `
   <div class="page-head">
     <div><h1>Plantillas</h1><div class="sub">Mensajes de WhatsApp</div></div>
+    <div class="head-actions"><button class="btn sm" onclick="TplForm.open()">${I.plus} Nueva</button></div>
   </div>
   <div class="note">Variables disponibles: {nombre}, {plan}, {fecha}, {dias}, {cuando}</div>
+  <div class="sect"><h2>Mensajes automáticos</h2></div>
   <label>Vence pronto (1 día antes)</label>
   <textarea id="tp-porVencer" rows="3">${esc(t.porVencer)}</textarea>
   <label>Vence hoy</label>
   <textarea id="tp-hoy" rows="3">${esc(t.hoy)}</textarea>
   <label>Renovación exitosa</label>
   <textarea id="tp-renovado" rows="3">${esc(t.renovado)}</textarea>
-  <button class="btn full" style="margin-top:18px" onclick="V._savePlantillas()">Guardar plantillas</button>`;
+  <button class="btn full" style="margin-top:18px" onclick="V._savePlantillas()">Guardar plantillas</button>
+
+  <div class="sect"><h2>Mis plantillas</h2><span class="cnt">${DB.plantillas.length}</span></div>`;
+  if (!DB.plantillas.length) {
+    html += `<div class="card"><p style="color:var(--muted);font-size:.85rem;text-align:center;padding:6px">Crea tus propias plantillas con el botón "Nueva". Aparecerán al enviar WhatsApp a un cliente.</p></div>`;
+  }
+  DB.plantillas.forEach(p => {
+    html += `
+    <div class="list-item" onclick="TplForm.open('${p.id}')">
+      <div class="body">
+        <div class="title">${esc(p.nombre)}</div>
+        <div class="meta" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.texto)}</div>
+      </div>
+      <span class="chev">${I.chev}</span>
+    </div>`;
+  });
   App.render(html);
 };
 
@@ -520,6 +636,46 @@ V._savePlantillas = function(){
   DB.templates.hoy = document.getElementById('tp-hoy').value;
   DB.templates.renovado = document.getElementById('tp-renovado').value;
   dbSave(); toast('Plantillas guardadas');
+};
+
+/* ---- Plantillas personalizadas ---- */
+const TplForm = {
+  editId: null,
+  open(id){
+    TplForm.editId = id || null;
+    const p = id ? DB.plantillas.find(x => x.id === id) : {};
+    if (id && !p) return;
+    Modal.open(`
+      <div class="modal-head"><h2>${id ? 'Editar plantilla' : 'Nueva plantilla'}</h2>
+        <button class="icon-btn" onclick="Modal.close()">${I.x}</button></div>
+      <label>Nombre *</label>
+      <input id="tf-nombre" value="${esc(p.nombre||'')}" placeholder='Ej: "Promoción del mes"'>
+      <label>Mensaje *</label>
+      <textarea id="tf-texto" rows="4" placeholder="Hola {nombre}, ...">${esc(p.texto||'')}</textarea>
+      <div class="note" style="margin-top:10px">Puedes usar {nombre}, {plan}, {fecha}, {dias} y {cuando}; se reemplazan con los datos del cliente al enviar.</div>
+      <div class="modal-actions">
+        ${id ? `<button class="btn danger" onclick="TplForm.remove()">${I.trash}</button>` : ''}
+        <button class="btn" onclick="TplForm.save()">Guardar</button>
+      </div>`);
+  },
+  save(){
+    const nombre = document.getElementById('tf-nombre').value.trim();
+    const texto = document.getElementById('tf-texto').value.trim();
+    if (!nombre) return toast('El nombre es obligatorio', true);
+    if (!texto) return toast('Escribe el mensaje de la plantilla', true);
+    if (TplForm.editId) {
+      const p = DB.plantillas.find(x => x.id === TplForm.editId);
+      p.nombre = nombre; p.texto = texto;
+    } else {
+      DB.plantillas.push({ id: uid(), nombre, texto });
+    }
+    dbSave(); Modal.close(); toast('Plantilla guardada'); App.refresh();
+  },
+  remove(){
+    if (!confirm('¿Eliminar esta plantilla?')) return;
+    DB.plantillas = DB.plantillas.filter(x => x.id !== TplForm.editId);
+    dbSave(); Modal.close(); toast('Plantilla eliminada'); App.refresh();
+  }
 };
 
 /* =================================================================

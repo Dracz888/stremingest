@@ -7,11 +7,16 @@ const V = {};
    INICIO / GESTIÓN
 ================================================================= */
 V._rankPeriodo = 'mes';
+V._dashAnio = '';   // '' = todos los años
+V._dashMes = '';    // '' = todos los meses, '01'..'12'
+
+V._MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
 V.dashboard = function(){
-  const ing = totalIngresos();
-  const egr = totalEgresos();
-  const bal = balanceGeneral();
+  const anio = V._dashAnio, mes = V._dashMes;
+  const ing = totalIngresos(anio, mes);
+  const egr = totalEgresos(anio, mes);
+  const bal = balanceGeneral(anio, mes);
   const cart = cartera();
   const rank = rankingPlataformas(V._rankPeriodo);
   const maxVenta = rank.length ? Math.max(...rank.map(r => r.ventas), 1) : 1;
@@ -39,10 +44,20 @@ V.dashboard = function(){
     </button>
   </div>
 
-  <div class="sect"><h2>Balance por moneda</h2></div>`;
+  <div class="sect"><h2>Balance por moneda</h2></div>
+  <div style="display:flex;gap:8px;margin-bottom:10px">
+    <select style="margin:0" onchange="V._dashMes=this.value;App.nav('dashboard')">
+      <option value="">Todos los meses</option>
+      ${V._MESES.map((m,i) => { const v = String(i+1).padStart(2,'0'); return `<option value="${v}" ${mes===v?'selected':''}>${m}</option>`; }).join('')}
+    </select>
+    <select style="margin:0" onchange="V._dashAnio=this.value;App.nav('dashboard')">
+      <option value="">Todos los años</option>
+      ${aniosConMovimientos().map(y => `<option value="${y}" ${anio===y?'selected':''}>${y}</option>`).join('')}
+    </select>
+  </div>`;
 
   if (!monIds.length) {
-    html += `<div class="card"><div class="empty" style="padding:18px">${I.wallet}<p>Aún no hay movimientos registrados</p></div></div>`;
+    html += `<div class="card"><div class="empty" style="padding:18px">${I.wallet}<p>${anio || mes ? 'Sin movimientos en el período seleccionado' : 'Aún no hay movimientos registrados'}</p></div></div>`;
   } else {
     monIds.forEach(k => {
       const i = ing[k] || 0, e = egr[k] || 0, b = bal[k] || 0;
@@ -206,13 +221,17 @@ V._renderCliList = function(){
           <div class="sub-card" style="margin-bottom:8px">
             <div class="card-row">
               <span style="font-size:.83rem;font-weight:650">${fmtDate(r.fecha)}</span>
-              <span class="mono" style="font-weight:700">${fmtMapa(r.pagado, {zeroText:'—'})}</span>
+              <span style="display:flex;align-items:center;gap:8px">
+                <span class="mono" style="font-weight:700">${fmtMapa(r.pagado, {zeroText:'—'})}</span>
+                <button class="icon-btn" style="width:30px;height:30px;color:var(--red)" title="Eliminar registro"
+                  onclick="event.stopPropagation();V._delRegistro('${r.id}')">${I.trash}</button>
+              </span>
             </div>
             <div style="font-size:.78rem;color:var(--muted);margin-top:3px">
               ${(r.items||[]).map(p => esc(p.nombre) + ' (+' + p.dias + 'd)').join(' · ') || 'Sin planes'}
             </div>
             <div style="font-size:.78rem;color:var(--muted)">
-              ${(r.pagos||[]).map(p => esc(p.nombre) + ' ' + fmtMoneda(p.monto, p.monedaId)).join(' · ')}
+              ${(r.pagos||[]).map(p => esc(p.nombre) + ' ' + fmtMoneda(p.monto, p.monedaId) + (p.convMonto != null ? ' (= ' + fmtMoneda(p.convMonto, p.convMonedaId) + ')' : '')).join(' · ')}
               ${saldoTxt ? ' · ' + saldoTxt : ''}
             </div>
           </div>`;
@@ -397,6 +416,7 @@ const WaMsg = {
         <option value="porVencer">Aviso: vence pronto</option>
         <option value="hoy">Aviso: vence hoy</option>
         <option value="renovado">Renovación exitosa</option>
+        ${DB.plantillas.map(t => `<option value="c:${t.id}">${esc(t.nombre)}</option>`).join('')}
         <option value="libre">Mensaje en blanco</option>
       </select>
       <div class="modal-actions">
@@ -413,7 +433,12 @@ const WaMsg = {
       const p = planes[sel ? Number(sel.value) : 0] || { nombre: 'su plan', vence: todayISO() };
       const venceF = p.vence || todayISO();
       const d = daysLeft(venceF);
-      texto = fillTemplate(DB.templates[tipo], {
+      let tpl = DB.templates[tipo];
+      if (tipo.startsWith('c:')) {
+        const custom = DB.plantillas.find(t => t.id === tipo.slice(2));
+        tpl = custom ? custom.texto : '';
+      }
+      texto = fillTemplate(tpl, {
         nombre: c.nombre,
         plan: p.nombre,
         fecha: fmtDate(venceF),
@@ -435,13 +460,17 @@ const RegForm = {
   clienteId: '',
   fecha: '',
   items: {},    // suscripcionId -> {sel, dias}
-  pagos: [],    // {metodoId, monto}
+  pagos: [],    // {metodoId, monto, conv, convMonedaId, tasa, tasaOp}
+
+  nuevoPago(){
+    return { metodoId: '', monto: '', conv: false, convMonedaId: '', tasa: '', tasaOp: 'mult' };
+  },
 
   reset(){
     RegForm.clienteId = '';
     RegForm.fecha = todayISO();
     RegForm.items = {};
-    RegForm.pagos = [{ metodoId: '', monto: '' }];
+    RegForm.pagos = [RegForm.nuevoPago()];
   },
 
   setCliente(id){
@@ -449,7 +478,36 @@ const RegForm = {
     RegForm.items = {};
     clienteSuscripciones(id).forEach(s => { RegForm.items[s.id] = { sel: true, dias: 30 }; });
     App.nav('registro');
+  },
+
+  /* Activa/desactiva la conversión por tasa de un pago, proponiendo
+     como destino la moneda de los planes seleccionados */
+  toggleConv(i, checked){
+    const pg = RegForm.pagos[i];
+    if (!pg) return;
+    pg.conv = checked;
+    if (checked && !pg.convMonedaId) {
+      const met = getMetodo(pg.metodoId);
+      const subs = clienteSuscripciones(RegForm.clienteId);
+      const esperadas = subs.filter(s => { const it = RegForm.items[s.id]; return it && it.sel; }).map(s => s.monedaId);
+      pg.convMonedaId = esperadas.find(mid => mid && (!met || mid !== met.monedaId))
+        || (DB.monedas.find(m => m.activo && (!met || m.id !== met.monedaId)) || {}).id || '';
+    }
+    App.nav('registro');
   }
+};
+
+/* Monto efectivo de un pago para el saldo: si tiene tasa, se convierte
+   a la moneda destino (multiplicando o dividiendo según se eligió) */
+V._pagoEfectivo = function(pg){
+  const met = getMetodo(pg.metodoId);
+  if (!met) return null;
+  const monto = Number(pg.monto) || 0;
+  const tasa = Number(pg.tasa) || 0;
+  if (pg.conv && pg.convMonedaId && tasa > 0) {
+    return { monedaId: pg.convMonedaId, monto: round2(pg.tasaOp === 'div' ? monto / tasa : monto * tasa) };
+  }
+  return { monedaId: met.monedaId, monto };
 };
 
 V.registro = function(){
@@ -518,6 +576,33 @@ V.registro = function(){
     RegForm.pagos.forEach((pg, i) => {
       const met = getMetodo(pg.metodoId);
       const metsOpts = mets.map(m => `<option value="${m.id}" ${pg.metodoId===m.id?'selected':''}>${esc(m.nombre)} (${esc(monedaCodigo(m.monedaId))})</option>`).join('');
+      let convHtml = '';
+      if (met) {
+        const monedasConv = DB.monedas.filter(m => (m.activo || m.id === pg.convMonedaId) && m.id !== met.monedaId);
+        const monedasOpts = monedasConv.map(m => `<option value="${m.id}" ${pg.convMonedaId===m.id?'selected':''}>${esc(m.codigo)} — ${esc(m.nombre)}</option>`).join('');
+        convHtml = `
+        <label style="display:flex;align-items:center;gap:9px;margin-top:14px;font-size:.85rem;color:var(--text);font-weight:500">
+          <input type="checkbox" ${pg.conv?'checked':''} onchange="RegForm.toggleConv(${i},this.checked)">
+          El pago es en otra moneda (aplicar tasa)
+        </label>`;
+        if (pg.conv) {
+          convHtml += `
+          <label>Convertir a</label>
+          <select onchange="RegForm.pagos[${i}].convMonedaId=this.value;V._regCalc()">
+            <option value="">Seleccionar moneda…</option>${monedasOpts}
+          </select>
+          <label>Tasa de cambio</label>
+          <div style="display:flex;gap:8px">
+            <input type="number" step="any" min="0" inputmode="decimal" value="${pg.tasa}" placeholder="Ej: 36.5"
+              oninput="RegForm.pagos[${i}].tasa=this.value;V._regCalc()">
+          </div>
+          <div class="seg" style="margin-top:10px">
+            <button class="${pg.tasaOp!=='div'?'active':''}" onclick="RegForm.pagos[${i}].tasaOp='mult';App.nav('registro')">× Multiplicar</button>
+            <button class="${pg.tasaOp==='div'?'active':''}" onclick="RegForm.pagos[${i}].tasaOp='div';App.nav('registro')">÷ Dividir</button>
+          </div>
+          <div id="rf-conv-${i}" style="font-size:.78rem;color:var(--accent);margin-top:6px;font-weight:600"></div>`;
+        }
+      }
       html += `
       <div class="sub-card">
         ${RegForm.pagos.length > 1 ? `<button class="remove" onclick="RegForm.pagos.splice(${i},1);App.nav('registro')">${I.x}</button>` : ''}
@@ -528,11 +613,12 @@ V.registro = function(){
         <label>Monto${met ? ' en ' + esc(monedaCodigo(met.monedaId)) : ''}</label>
         <input type="number" step="any" min="0" inputmode="decimal" value="${pg.monto}"
           oninput="RegForm.pagos[${i}].monto=this.value;V._regCalc()" placeholder="0.00">
+        ${convHtml}
       </div>`;
     });
 
     html += `
-    <button class="add-row" onclick="RegForm.pagos.push({metodoId:'',monto:''});App.nav('registro')">${I.plus} Agregar pago</button>
+    <button class="add-row" onclick="RegForm.pagos.push(RegForm.nuevoPago());App.nav('registro')">${I.plus} Agregar pago</button>
     <div class="summary" id="rf-summary"></div>
     <div class="spacer"></div>
     <button class="btn full" style="margin-top:12px" onclick="V._regSave()">Guardar registro</button>`;
@@ -552,11 +638,19 @@ V._regCalc = function(){
     if (it && it.sel) esperadoItems.push({ monedaId: s.monedaId, monto: s.precio });
   });
   const esperado = sumarPorMoneda(esperadoItems);
-  const pagado = sumarPorMoneda(RegForm.pagos.map(pg => {
-    const met = getMetodo(pg.metodoId);
-    return { monedaId: met ? met.monedaId : '', monto: pg.monto };
-  }).filter(x => x.monedaId));
+  const pagado = sumarPorMoneda(RegForm.pagos.map(pg => V._pagoEfectivo(pg)).filter(x => x && x.monedaId));
   const saldo = restarMapas(pagado, esperado);
+
+  // vista previa de cada conversión con tasa
+  RegForm.pagos.forEach((pg, i) => {
+    const el = document.getElementById('rf-conv-' + i);
+    if (!el) return;
+    const met = getMetodo(pg.metodoId);
+    const ef = V._pagoEfectivo(pg);
+    el.textContent = (met && ef && pg.conv && pg.convMonedaId && Number(pg.tasa) > 0)
+      ? fmtMoneda(Number(pg.monto) || 0, met.monedaId) + ' equivale a ' + fmtMoneda(ef.monto, ef.monedaId)
+      : 'Ingresa la tasa y la moneda destino para ver la conversión.';
+  });
 
   const sum = document.getElementById('rf-summary');
   if (!sum) return;
@@ -604,11 +698,24 @@ V._regSave = function(){
     if (!met) return toast('Selecciona el método de cada pago', true);
     const monto = Number(pg.monto) || 0;
     if (monto <= 0) return toast('Ingresa el monto de cada pago', true);
-    pagos.push({ metodoId: met.id, nombre: met.nombre, monedaId: met.monedaId, monto });
+    const pago = { metodoId: met.id, nombre: met.nombre, monedaId: met.monedaId, monto };
+    if (pg.conv) {
+      if (!pg.convMonedaId) return toast('Selecciona la moneda destino de la conversión', true);
+      const tasa = Number(pg.tasa) || 0;
+      if (tasa <= 0) return toast('Ingresa la tasa de cambio', true);
+      pago.tasa = tasa;
+      pago.tasaOp = pg.tasaOp === 'div' ? 'div' : 'mult';
+      pago.convMonedaId = pg.convMonedaId;
+      pago.convMonto = round2(pago.tasaOp === 'div' ? monto / tasa : monto * tasa);
+    }
+    pagos.push(pago);
   }
 
   const esperado = sumarPorMoneda(items.map(i => ({ monedaId: i.monedaId, monto: i.precio })));
-  const pagado = sumarPorMoneda(pagos);
+  // para el saldo cuenta el monto convertido (si el pago llevó tasa)
+  const pagado = sumarPorMoneda(pagos.map(p => p.convMonedaId
+    ? { monedaId: p.convMonedaId, monto: p.convMonto }
+    : { monedaId: p.monedaId, monto: p.monto }));
   const saldo = restarMapas(pagado, esperado);
 
   // aplicar nuevos vencimientos a las suscripciones del cliente
@@ -627,6 +734,27 @@ V._regSave = function(){
   toast('Pago registrado');
   V._cliExpanded = cliId;
   App.nav('clientes');
+};
+
+/* ---- Eliminar registros de pagos y recargas ---- */
+V._delRegistro = function(id){
+  const r = DB.registros.find(x => x.id === id);
+  if (!r) return;
+  if (!confirm('¿Eliminar este registro de pago? Se ajustarán los ingresos y la cartera. Los vencimientos de los planes no se modifican.')) return;
+  DB.registros = DB.registros.filter(x => x.id !== id);
+  dbSave();
+  toast('Registro eliminado');
+  App.refresh();
+};
+
+V._delRecarga = function(id){
+  const r = DB.recargas.find(x => x.id === id);
+  if (!r) return;
+  if (!confirm('¿Eliminar esta recarga? Se ajustarán los egresos y la cartera.')) return;
+  DB.recargas = DB.recargas.filter(x => x.id !== id);
+  dbSave();
+  toast('Recarga eliminada');
+  App.refresh();
 };
 
 /* =================================================================
@@ -654,12 +782,22 @@ V.alertas = function(){
     </div>`;
   }
 
+  // texto de cuánto falta para el vencimiento
+  const faltaTxt = (x) => {
+    let t;
+    if (x.dias < 0) t = daysText(x.dias).toLowerCase();
+    else if (x.dias === 0) t = 'vence hoy';
+    else if (x.dias === 1) t = 'falta 1 día (mañana)';
+    else t = 'faltan ' + x.dias + ' días';
+    return t + ' · ' + fmtDate(x.plan.vence);
+  };
+
   const itemCliente = (x) => `
     <div class="list-item">
       <div class="avatar">${esc(initials(x.cliente.nombre))}</div>
       <div class="body">
         <div class="title">${esc(x.cliente.nombre)}</div>
-        <div class="meta">${esc(x.plan.nombre)} · ${daysText(x.dias).toLowerCase()}</div>
+        <div class="meta">${esc(x.plan.nombre)} · ${faltaTxt(x)}</div>
       </div>
       <button class="icon-btn" style="color:#1faa53" onclick="WaMsg.open('${x.cliente.id}')">${I.wa}</button>
     </div>`;
@@ -672,6 +810,11 @@ V.alertas = function(){
   html += `<div class="sect"><h2>Clientes por vencer</h2><span class="cnt">${a.cliPorVencer.length}</span></div>`;
   html += a.cliPorVencer.length
     ? a.cliPorVencer.map(itemCliente).join('')
+    : `<div class="card"><p style="color:var(--muted);font-size:.85rem;text-align:center;padding:6px">Ninguno</p></div>`;
+
+  html += `<div class="sect"><h2>Próximos vencimientos (7 días)</h2><span class="cnt">${a.cliProximos.length}</span></div>`;
+  html += a.cliProximos.length
+    ? a.cliProximos.map(itemCliente).join('')
     : `<div class="card"><p style="color:var(--muted);font-size:.85rem;text-align:center;padding:6px">Ninguno</p></div>`;
 
   html += `<div class="sect"><h2>Recargas por vencer</h2><span class="cnt">${a.recPorVencer.length}</span></div>`;
