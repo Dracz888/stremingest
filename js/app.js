@@ -63,7 +63,7 @@ const App = {
   ],
 
   /* Vistas del menú se marcan bajo la pestaña Menú */
-  menuViews: ['menu','plataformas','monedas','metodos','cuentas','recargas','plantillas','sync','respaldo'],
+  menuViews: ['menu','plataformas','monedas','metodos','cuentas','movimientos','recargas','plantillas','sync','respaldo'],
 
   renderTabbar(){
     const n = alertCount();
