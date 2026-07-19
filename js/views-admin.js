@@ -460,7 +460,10 @@ V.movimientos = function(){
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
             <span class="mono" style="font-weight:750;color:var(--red)">-${fmtMapa(r.total, {sep:'<br>-', zeroText:'—'})}</span>
-            <button class="icon-btn" style="width:32px;height:32px;color:var(--red)" title="Eliminar" onclick="V._delRecarga('${r.id}')">${I.trash}</button>
+            <div style="display:flex;gap:4px">
+              <button class="icon-btn" style="width:32px;height:32px" title="Editar" onclick="RecForm.edit('${r.id}')">${I.edit}</button>
+              <button class="icon-btn" style="width:32px;height:32px;color:var(--red)" title="Eliminar" onclick="V._delRecarga('${r.id}')">${I.trash}</button>
+            </div>
           </div>
         </div>
       </div>`;
@@ -496,7 +499,10 @@ V.recargas = function(){
         <div style="text-align:right">
           <div class="mono" style="font-weight:750;color:var(--red)">-${fmtMapa(r.total, {sep:'<br>-'})}</div>
           <span class="days-pill ${daysPillClass(d)}" style="margin-top:5px;display:inline-block">${daysText(d)}</span>
-          <div><button class="icon-btn" style="width:32px;height:32px;color:var(--red);margin-top:5px" title="Eliminar recarga" onclick="V._delRecarga('${r.id}')">${I.trash}</button></div>
+          <div style="display:flex;gap:4px;justify-content:flex-end;margin-top:5px">
+            <button class="icon-btn" style="width:32px;height:32px" title="Editar recarga" onclick="RecForm.edit('${r.id}')">${I.edit}</button>
+            <button class="icon-btn" style="width:32px;height:32px;color:var(--red)" title="Eliminar recarga" onclick="V._delRecarga('${r.id}')">${I.trash}</button>
+          </div>
         </div>
       </div>
     </div>`;
@@ -505,15 +511,28 @@ V.recargas = function(){
 };
 
 const RecForm = {
-  cuentaId: '', fecha: '', dias: 30,
+  editId: '', cuentaId: '', fecha: '', dias: 30,
   pagos: [],
 
   open(cuentaId){
+    RecForm.editId = '';
     RecForm.cuentaId = cuentaId || '';
     RecForm.fecha = todayISO();
     RecForm.dias = 30;
     RecForm.pagos = [{ metodoId: '', monto: '' }];
     if (!DB.cuentas.length) { toast('Primero crea una cuenta propia', true); return App.nav('cuentas'); }
+    RecForm.render();
+  },
+
+  edit(id){
+    const r = DB.recargas.find(x => x.id === id);
+    if (!r) return toast('Recarga no encontrada', true);
+    RecForm.editId = r.id;
+    RecForm.cuentaId = r.cuentaId;
+    RecForm.fecha = r.fecha;
+    RecForm.dias = r.dias;
+    RecForm.pagos = (r.pagos || []).map(p => ({ metodoId: p.metodoId, monto: String(p.monto) }));
+    if (!RecForm.pagos.length) RecForm.pagos = [{ metodoId: '', monto: '' }];
     RecForm.render();
   },
 
@@ -538,7 +557,7 @@ const RecForm = {
     });
 
     Modal.open(`
-      <div class="modal-head"><h2>Nueva recarga</h2>
+      <div class="modal-head"><h2>${RecForm.editId ? 'Editar recarga' : 'Nueva recarga'}</h2>
         <button class="icon-btn" onclick="Modal.close()">${I.x}</button></div>
       <label>Cuenta *</label>
       <select id="rec-cuenta" onchange="RecForm.cuentaId=this.value">
@@ -555,7 +574,7 @@ const RecForm = {
       <button class="add-row" onclick="RecForm.pagos.push({metodoId:'',monto:''});RecForm.render()">${I.plus} Agregar pago</button>
       <div class="summary" id="rec-summary"></div>
       <div class="modal-actions">
-        <button class="btn" onclick="RecForm.save()">Guardar recarga</button>
+        <button class="btn" onclick="RecForm.save()">${RecForm.editId ? 'Guardar cambios' : 'Guardar recarga'}</button>
       </div>`);
     RecForm.calc();
   },
@@ -582,14 +601,22 @@ const RecForm = {
       if (monto <= 0) return toast('Ingresa el monto de cada pago', true);
       pagos.push({ metodoId: met.id, nombre: met.nombre, monedaId: met.monedaId, monto });
     }
-    DB.recargas.push({
-      id: uid(), cuentaId: RecForm.cuentaId, fecha: RecForm.fecha,
+    const datos = {
+      cuentaId: RecForm.cuentaId, fecha: RecForm.fecha,
       pagos, total: sumarPorMoneda(pagos),
       dias: RecForm.dias, vence: addDays(RecForm.fecha, RecForm.dias)
-    });
+    };
+    if (RecForm.editId) {
+      const r = DB.recargas.find(x => x.id === RecForm.editId);
+      if (!r) return toast('Recarga no encontrada', true);
+      Object.assign(r, datos);
+    } else {
+      DB.recargas.push({ id: uid(), ...datos });
+    }
     const cta = getCuenta(RecForm.cuentaId);
     if (cta) cta.estado = 'activa';
-    dbSave(); Modal.close(); toast('Recarga registrada');
+    dbSave(); Modal.close(); toast(RecForm.editId ? 'Recarga actualizada' : 'Recarga registrada');
+    RecForm.editId = '';
     App.nav('recargas');
   }
 };
