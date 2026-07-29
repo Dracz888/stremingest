@@ -824,7 +824,7 @@ V.alertas = function(){
       <div class="avatar" style="color:var(--amber)">${I.refresh.replace('<svg','<svg width="18" height="18"')}</div>
       <div class="body">
         <div class="title">${esc(x.cuenta.correo)}</div>
-        <div class="meta">Cuenta propia · ${daysText(x.dias).toLowerCase()}</div>
+        <div class="meta">Cuenta propia · ${daysText(x.dias).toLowerCase()} · ${fmtDate(x.vence)}</div>
       </div>
       <button class="btn sm ghost" onclick="RecForm.open('${x.cuenta.id}')">Recargar</button>
     </div>`).join('')

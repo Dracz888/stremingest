@@ -18,7 +18,7 @@ function addDays(isoDate, days){
 /* Días restantes: 0 = vence hoy, negativo = vencido */
 function daysLeft(isoDate){
   const a = new Date(todayISO() + 'T00:00:00');
-  const b = new Date(isoDate + 'T00:00:00');
+  const b = new Date(String(isoDate || '').slice(0,10) + 'T00:00:00');
   return Math.round((b - a) / 86400000);
 }
 
@@ -50,6 +50,7 @@ function initials(name){
 
 /* Texto de días restantes */
 function daysText(d){
+  if (d == null || isNaN(d)) return 'Sin fecha';
   if (d < 0) return 'Vencido ' + (d === -1 ? 'ayer' : 'hace ' + Math.abs(d) + ' días');
   if (d === 0) return 'Vence hoy';
   if (d === 1) return 'Vence mañana';

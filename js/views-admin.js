@@ -288,9 +288,9 @@ V.cuentas = function(){
   if (!DB.cuentas.length) html += `<div class="empty">${I.key}<p>Registra las cuentas de streaming que usas para dar servicio.</p></div>`;
   DB.cuentas.forEach(c => {
     const plats = (c.plataformaIds||[]).map(id => getPlataforma(id)).filter(Boolean);
-    const recs = DB.recargas.filter(r => r.cuentaId === c.id);
-    const ultima = recs.length ? recs.reduce((a,b) => a.vence > b.vence ? a : b) : null;
-    const d = ultima ? daysLeft(ultima.vence) : null;
+    const ultima = ultimaRecarga(c.id);
+    const venceUlt = ultima ? recargaVence(ultima) : null;
+    const d = venceUlt ? daysLeft(venceUlt) : null;
     const estadoChip = c.estado === 'activa' ? '<span class="chip green">Activa</span>'
       : c.estado === 'vencida' ? '<span class="chip red">Vencida</span>'
       : '<span class="chip amber">Suspendida</span>';
@@ -302,7 +302,7 @@ V.cuentas = function(){
           <div style="font-size:.78rem;color:var(--muted);margin-top:2px">
             ${plats.length ? plats.map(p => esc(p.nombre)).join(' · ') : 'Sin plataformas asociadas'}
           </div>
-          ${ultima ? `<div style="font-size:.78rem;margin-top:4px;color:${d < 0 ? 'var(--red)' : d <= 5 ? 'var(--amber)' : 'var(--muted)'}">Recarga: ${daysText(d).toLowerCase()} (${fmtDate(ultima.vence)})</div>` : ''}
+          ${ultima ? `<div style="font-size:.78rem;margin-top:4px;color:${d < 0 ? 'var(--red)' : d <= 5 ? 'var(--amber)' : 'var(--muted)'}">Recarga: ${daysText(d).toLowerCase()} (${fmtDate(venceUlt)})</div>` : ''}
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:7px">
           ${estadoChip}

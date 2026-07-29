@@ -144,6 +144,13 @@ function dbMigrate(){
 
   // ---- 6. Recargas: pagos(usd/tasa) -> por-moneda ----
   (DB.recargas || []).forEach(r => {
+    // Recargas viejas sin fecha de vencimiento: se deduce de fecha + días,
+    // si no, la cuenta nunca entra en las alertas.
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(r.vence || '').slice(0,10))) {
+      const f = String(r.fecha || '').slice(0,10);
+      const dias = Number(r.dias) || 0;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(f) && dias > 0) r.vence = addDays(f, dias);
+    }
     if (r.total && typeof r.total === 'object') return;
     const pagos = (r.pagos || []).map(pg => {
       const met = (DB.metodos || []).find(m => m.id === pg.metodoId);
@@ -364,6 +371,44 @@ function rankingPlataformas(periodo){
   return Object.values(map).sort((a,b) => b.ventas - a.ventas);
 }
 
+/* ============ Recargas de una cuenta ============ */
+
+/* Fecha ISO de vencimiento de una recarga.
+   Si el dato viene sin 'vence' (recargas guardadas por versiones antiguas)
+   se deduce de fecha + días. Devuelve null si no se puede saber. */
+function recargaVence(r){
+  if (!r) return null;
+  const v = String(r.vence || '').slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+  const f = String(r.fecha || '').slice(0, 10);
+  const dias = Number(r.dias) || 0;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(f) && dias > 0) return addDays(f, dias);
+  return null;
+}
+
+/* Recargas de una cuenta, de la registrada más recientemente a la más antigua.
+   Ordena por la fecha de la recarga y, si dos coinciden, gana la guardada después. */
+function recargasDeCuenta(cuentaId){
+  return DB.recargas
+    .map((r, i) => ({ r, i }))
+    .filter(x => x.r.cuentaId === cuentaId && recargaVence(x.r))
+    .sort((a, b) => {
+      const fa = String(a.r.fecha || '').slice(0, 10);
+      const fb = String(b.r.fecha || '').slice(0, 10);
+      if (fa !== fb) return fa < fb ? 1 : -1;
+      return b.i - a.i;
+    })
+    .map(x => x.r);
+}
+
+/* Recarga vigente de una cuenta: la última que se registró.
+   Antes se tomaba la de vencimiento más lejano, así que una recarga corta
+   registrada después quedaba tapada por una vieja más larga y no alertaba. */
+function ultimaRecarga(cuentaId){
+  const recs = recargasDeCuenta(cuentaId);
+  return recs.length ? recs[0] : null;
+}
+
 /* ============ Alertas ============ */
 /* Devuelve {cliVencidos, cliPorVencer, cliProximos, recPorVencer} */
 function calcAlertas(){
@@ -381,11 +426,12 @@ function calcAlertas(){
   });
   const recPorVencer = [];
   DB.cuentas.forEach(ct => {
-    const recs = DB.recargas.filter(r => r.cuentaId === ct.id);
-    if (!recs.length) return;
-    const ultima = recs.reduce((a,b) => a.vence > b.vence ? a : b);
-    const d = daysLeft(ultima.vence);
-    if (d <= 5) recPorVencer.push({ cuenta: ct, recarga: ultima, dias: d });
+    const ultima = ultimaRecarga(ct.id);
+    if (!ultima) return;
+    const vence = recargaVence(ultima);
+    const d = daysLeft(vence);
+    if (isNaN(d)) return;
+    if (d <= 5) recPorVencer.push({ cuenta: ct, recarga: ultima, vence, dias: d });
   });
   cliVencidos.sort((a,b) => a.dias - b.dias);
   cliPorVencer.sort((a,b) => a.dias - b.dias);
