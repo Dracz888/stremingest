@@ -440,6 +440,7 @@ V.movimientos = function(){
             <div style="font-size:.78rem;color:var(--muted)">
               ${(r.pagos||[]).map(p => esc(p.nombre) + ' ' + fmtMoneda(p.monto, p.monedaId) + (p.convMonto != null ? ' (= ' + fmtMoneda(p.convMonto, p.convMonedaId) + ')' : '')).join(' · ')}
             </div>
+            ${r.notas ? `<div style="font-size:.78rem;margin-top:3px;white-space:pre-wrap">${esc(r.notas)}</div>` : ''}
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
             <span class="mono" style="font-weight:750;color:var(--green)">+${fmtMapa(r.pagado, {sep:'<br>+', zeroText:'—'})}</span>

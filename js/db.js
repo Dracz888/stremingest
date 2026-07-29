@@ -12,7 +12,7 @@ function dbDefault(){
     plataformas: [],      // {id, nombre, monedaId, precio, activo}
     metodos: [],          // {id, nombre, monedaId, activo}
     cuentas: [],          // {id, correo, clave, plataformaIds:[], estado, fecha}
-    registros: [],        // {id, clienteId, fecha, items:[{suscripcionId, plataformaId, nombre, monedaId, precio, dias, vence}], pagos:[{metodoId, nombre, monedaId, monto}], esperado:{monedaId:total}, pagado:{monedaId:total}, saldo:{monedaId:total}}
+    registros: [],        // {id, clienteId, fecha, notas, items:[{suscripcionId, plataformaId, nombre, monedaId, precio, dias, vence}], pagos:[{metodoId, nombre, monedaId, monto}], esperado:{monedaId:total}, pagado:{monedaId:total}, saldo:{monedaId:total}}
     recargas: [],         // {id, cuentaId, cliente, fecha, pagos:[{metodoId, nombre, monedaId, monto}], total:{monedaId:total}, dias, vence}  (cliente: nombre opcional)
     templates: {
       porVencer: 'Hola {nombre}, te recordamos que tu plan de {plan} vence {cuando}. Escríbenos para renovarlo y no perder el servicio.',

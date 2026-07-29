@@ -200,6 +200,7 @@ V._renderCliList = function(){
       Object.keys(saldo).forEach(k => { if (saldo[k] < 0) debe[k] = -saldo[k]; else favor[k] = saldo[k]; });
       if (Object.keys(debe).length) html += `<div class="note" style="color:var(--red)">Debe ${fmtMapa(debe)}</div>`;
       if (Object.keys(favor).length) html += `<div class="note" style="color:var(--green)">Saldo a favor: ${fmtMapa(favor)}</div>`;
+      if (c.notas) html += `<div class="note" style="white-space:pre-wrap">${I.msg.replace('<svg','<svg width="13" height="13" style="vertical-align:-1px;margin-right:5px"')}${esc(c.notas)}</div>`;
       html += `
       <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
         <button class="btn sm wa-btn" onclick="event.stopPropagation();WaMsg.open('${c.id}')">${I.wa} WhatsApp</button>
@@ -234,6 +235,7 @@ V._renderCliList = function(){
               ${(r.pagos||[]).map(p => esc(p.nombre) + ' ' + fmtMoneda(p.monto, p.monedaId) + (p.convMonto != null ? ' (= ' + fmtMoneda(p.convMonto, p.convMonedaId) + ')' : '')).join(' · ')}
               ${saldoTxt ? ' · ' + saldoTxt : ''}
             </div>
+            ${r.notas ? `<div style="font-size:.78rem;margin-top:4px;white-space:pre-wrap">${esc(r.notas)}</div>` : ''}
           </div>`;
         });
         html += `</div>`;
@@ -459,6 +461,7 @@ const WaMsg = {
 const RegForm = {
   clienteId: '',
   fecha: '',
+  notas: '',
   items: {},    // suscripcionId -> {sel, dias}
   pagos: [],    // {metodoId, monto, conv, convMonedaId, tasa, tasaOp}
 
@@ -469,6 +472,7 @@ const RegForm = {
   reset(){
     RegForm.clienteId = '';
     RegForm.fecha = todayISO();
+    RegForm.notas = '';
     RegForm.items = {};
     RegForm.pagos = [RegForm.nuevoPago()];
   },
@@ -619,6 +623,9 @@ V.registro = function(){
 
     html += `
     <button class="add-row" onclick="RegForm.pagos.push(RegForm.nuevoPago());App.nav('registro')">${I.plus} Agregar pago</button>
+    <label>Notas</label>
+    <textarea id="rf-notas" rows="2" placeholder="Observaciones de este pago (opcional)"
+      oninput="RegForm.notas=this.value">${esc(RegForm.notas)}</textarea>
     <div class="summary" id="rf-summary"></div>
     <div class="spacer"></div>
     <button class="btn full" style="margin-top:12px" onclick="V._regSave()">Guardar registro</button>`;
@@ -726,6 +733,7 @@ V._regSave = function(){
 
   DB.registros.push({
     id: uid(), clienteId: RegForm.clienteId, fecha: RegForm.fecha,
+    notas: (RegForm.notas || '').trim(),
     items, pagos, esperado, pagado, saldo
   });
   dbSave();
