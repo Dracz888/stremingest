@@ -13,8 +13,8 @@ Aplicación móvil (PWA) para administrar un negocio de reventa de cuentas de st
 - **Inicio (Gestión):** balance por moneda (ingresos, egresos y balance de cada moneda), cartera por moneda y ranking de planes más vendidos (mes actual / 30 días / histórico).
 - **Clientes:** vista consolidada por cliente con sus planes (cuenta asociada, precio y días restantes de cada uno), saldo por moneda, historial de pagos y acceso directo a WhatsApp. Desde aquí se asignan las cuentas y planes que usa.
 - **Registrar (botón central):** renovación de los planes que el cliente ya tiene: se elige a cuáles añadir días y con qué método(s) se pagó. Calcula el nuevo vencimiento y el saldo por moneda.
-- **Alertas:** clientes vencidos, clientes por vencer (1 día y el mismo día) y recargas por vencer (5 a 0 días), con notificaciones del navegador.
-- **Menú:** catálogo de plataformas/planes (con moneda y precio), catálogo de monedas, métodos de pago, cuentas propias de streaming, recargas (egresos), plantillas de WhatsApp y respaldo de datos.
+- **Alertas:** clientes vencidos, clientes por vencer (1 día y el mismo día) y recargas por vencer (5 a 0 días), con notificaciones del navegador. Si la recarga tiene nombre de cliente, se muestra en la alerta y en la notificación.
+- **Menú:** catálogo de plataformas/planes (con moneda y precio), catálogo de monedas, métodos de pago, cuentas propias de streaming, recargas (egresos, con nombre de cliente opcional), plantillas de WhatsApp y respaldo de datos.
 
 ## Cómo usarla
 

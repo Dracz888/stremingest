@@ -13,7 +13,7 @@ function dbDefault(){
     metodos: [],          // {id, nombre, monedaId, activo}
     cuentas: [],          // {id, correo, clave, plataformaIds:[], estado, fecha}
     registros: [],        // {id, clienteId, fecha, items:[{suscripcionId, plataformaId, nombre, monedaId, precio, dias, vence}], pagos:[{metodoId, nombre, monedaId, monto}], esperado:{monedaId:total}, pagado:{monedaId:total}, saldo:{monedaId:total}}
-    recargas: [],         // {id, cuentaId, fecha, pagos:[{metodoId, nombre, monedaId, monto}], total:{monedaId:total}, dias, vence}
+    recargas: [],         // {id, cuentaId, cliente, fecha, pagos:[{metodoId, nombre, monedaId, monto}], total:{monedaId:total}, dias, vence}  (cliente: nombre opcional)
     templates: {
       porVencer: 'Hola {nombre}, te recordamos que tu plan de {plan} vence {cuando}. Escríbenos para renovarlo y no perder el servicio.',
       hoy: 'Hola {nombre}, tu plan de {plan} vence HOY. Renueva ahora para mantener tu servicio activo.',
@@ -420,6 +420,7 @@ function checkNotifications(){
     x.cliente.nombre + ' — ' + x.plan.nombre + ' ya venció'));
   a.recPorVencer.forEach(x => send('r' + x.cuenta.id,
     'Recarga por vencer',
-    'Cuenta ' + x.cuenta.correo + ' — ' + (x.dias <= 0 ? 'vence HOY' : x.dias + ' día(s) restante(s)')));
+    (x.recarga && x.recarga.cliente ? x.recarga.cliente + ' — ' : '')
+      + 'Cuenta ' + x.cuenta.correo + ' — ' + (x.dias <= 0 ? 'vence HOY' : x.dias + ' día(s) restante(s)')));
   localStorage.setItem(key, JSON.stringify(done));
 }

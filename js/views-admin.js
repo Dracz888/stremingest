@@ -302,7 +302,7 @@ V.cuentas = function(){
           <div style="font-size:.78rem;color:var(--muted);margin-top:2px">
             ${plats.length ? plats.map(p => esc(p.nombre)).join(' · ') : 'Sin plataformas asociadas'}
           </div>
-          ${ultima ? `<div style="font-size:.78rem;margin-top:4px;color:${d < 0 ? 'var(--red)' : d <= 5 ? 'var(--amber)' : 'var(--muted)'}">Recarga: ${daysText(d).toLowerCase()} (${fmtDate(ultima.vence)})</div>` : ''}
+          ${ultima ? `<div style="font-size:.78rem;margin-top:4px;color:${d < 0 ? 'var(--red)' : d <= 5 ? 'var(--amber)' : 'var(--muted)'}">Recarga: ${daysText(d).toLowerCase()} (${fmtDate(ultima.vence)})${ultima.cliente ? ' · ' + esc(ultima.cliente) : ''}</div>` : ''}
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:7px">
           ${estadoChip}
@@ -455,7 +455,7 @@ V.movimientos = function(){
           <div style="flex:1;min-width:0">
             <div style="font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span class="chip red" style="margin-right:6px">Egreso</span>${esc(cta ? cta.correo : '(cuenta eliminada)')}</div>
             <div style="font-size:.78rem;color:var(--muted);margin-top:3px">
-              ${fmtDate(r.fecha)} · Recarga ${r.dias} días · ${(r.pagos||[]).map(p => esc(p.nombre) + ' ' + fmtMoneda(p.monto, p.monedaId)).join(' · ')}
+              ${fmtDate(r.fecha)} · Recarga ${r.dias} días${r.cliente ? ' · Cliente: ' + esc(r.cliente) : ''} · ${(r.pagos||[]).map(p => esc(p.nombre) + ' ' + fmtMoneda(p.monto, p.monedaId)).join(' · ')}
             </div>
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
@@ -492,6 +492,7 @@ V.recargas = function(){
       <div class="card-row">
         <div style="flex:1;min-width:0">
           <div style="font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(cta ? cta.correo : '(cuenta eliminada)')}</div>
+          ${r.cliente ? `<div style="font-size:.78rem;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Cliente: ${esc(r.cliente)}</div>` : ''}
           <div style="font-size:.78rem;color:var(--muted);margin-top:2px">
             ${fmtDate(r.fecha)} · ${r.dias} días · ${(r.pagos||[]).map(p => esc(p.nombre) + ' ' + fmtMoneda(p.monto, p.monedaId)).join(' · ')}
           </div>
@@ -511,12 +512,16 @@ V.recargas = function(){
 };
 
 const RecForm = {
-  editId: '', cuentaId: '', fecha: '', dias: 30,
+  editId: '', cuentaId: '', cliente: '', fecha: '', dias: 30,
   pagos: [],
 
   open(cuentaId){
     RecForm.editId = '';
     RecForm.cuentaId = cuentaId || '';
+    // al recargar una cuenta se propone el cliente de su última recarga
+    const previas = cuentaId ? DB.recargas.filter(r => r.cuentaId === cuentaId) : [];
+    const ultima = previas.length ? previas.reduce((a,b) => a.vence > b.vence ? a : b) : null;
+    RecForm.cliente = (ultima && ultima.cliente) || '';
     RecForm.fecha = todayISO();
     RecForm.dias = 30;
     RecForm.pagos = [{ metodoId: '', monto: '' }];
@@ -529,6 +534,7 @@ const RecForm = {
     if (!r) return toast('Recarga no encontrada', true);
     RecForm.editId = r.id;
     RecForm.cuentaId = r.cuentaId;
+    RecForm.cliente = r.cliente || '';
     RecForm.fecha = r.fecha;
     RecForm.dias = r.dias;
     RecForm.pagos = (r.pagos || []).map(p => ({ metodoId: p.metodoId, monto: String(p.monto) }));
@@ -539,6 +545,10 @@ const RecForm = {
   render(){
     const mets = DB.metodos.filter(m => m.activo);
     const ctasOpts = DB.cuentas.map(c => `<option value="${c.id}" ${RecForm.cuentaId===c.id?'selected':''}>${esc(c.correo)}</option>`).join('');
+    // sugerencias con los clientes ya registrados (el campo admite cualquier nombre)
+    const cliOpts = DB.clientes.slice()
+      .sort((a,b) => String(a.nombre||'').localeCompare(String(b.nombre||'')))
+      .map(c => `<option value="${esc(c.nombre)}"></option>`).join('');
     let pagosHtml = '';
     RecForm.pagos.forEach((pg, i) => {
       const met = getMetodo(pg.metodoId);
@@ -563,6 +573,11 @@ const RecForm = {
       <select id="rec-cuenta" onchange="RecForm.cuentaId=this.value">
         <option value="">Seleccionar cuenta…</option>${ctasOpts}
       </select>
+      <label>Cliente (opcional)</label>
+      <input type="text" list="rec-clientes" value="${esc(RecForm.cliente)}" placeholder="Nombre del cliente…"
+        oninput="RecForm.cliente=this.value">
+      <datalist id="rec-clientes">${cliOpts}</datalist>
+      <div style="font-size:.78rem;color:var(--muted);margin-top:5px">Si lo indicas, aparecerá en las alertas de esta recarga.</div>
       <label>Fecha</label>
       <input type="date" value="${RecForm.fecha}" onchange="RecForm.fecha=this.value;RecForm.calc()">
       <label>Duración de la recarga (días)</label>
@@ -602,7 +617,7 @@ const RecForm = {
       pagos.push({ metodoId: met.id, nombre: met.nombre, monedaId: met.monedaId, monto });
     }
     const datos = {
-      cuentaId: RecForm.cuentaId, fecha: RecForm.fecha,
+      cuentaId: RecForm.cuentaId, cliente: String(RecForm.cliente || '').trim(), fecha: RecForm.fecha,
       pagos, total: sumarPorMoneda(pagos),
       dias: RecForm.dias, vence: addDays(RecForm.fecha, RecForm.dias)
     };
@@ -616,7 +631,7 @@ const RecForm = {
     const cta = getCuenta(RecForm.cuentaId);
     if (cta) cta.estado = 'activa';
     dbSave(); Modal.close(); toast(RecForm.editId ? 'Recarga actualizada' : 'Recarga registrada');
-    RecForm.editId = '';
+    RecForm.editId = ''; RecForm.cliente = '';
     App.nav('recargas');
   }
 };
